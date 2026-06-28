@@ -1,0 +1,251 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    color: #e5e7eb;
+    background:
+        radial-gradient(circle at top, rgba(234, 88, 12, 0.18), transparent 30%),
+        linear-gradient(160deg, #020617 0%, #111827 45%, #1f2937 100%);
+    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    background: transparent;
+    color: #e5e7eb;
+}
+
+#app {
+    min-height: 100vh;
+}
+
+.app-shell {
+    min-height: 100vh;
+    padding: 32px;
+}
+
+.hero-panel,
+.workspace-grid {
+    margin: 0 auto;
+    max-width: 1440px;
+}
+
+.hero-panel {
+    display: grid;
+    gap: 24px;
+    grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.8fr);
+    margin-bottom: 28px;
+}
+
+.hero-copy,
+.status-card,
+.sidebar-card,
+.canvas-card {
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    background: rgba(15, 23, 42, 0.82);
+    box-shadow: 0 24px 80px rgba(2, 6, 23, 0.45);
+    backdrop-filter: blur(18px);
+}
+
+.hero-copy,
+.status-card {
+    border-radius: 28px;
+    padding: 28px;
+}
+
+.eyebrow,
+.panel-label,
+.status-label {
+    margin: 0 0 12px;
+    color: #fdba74;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.hero-copy h1,
+.canvas-header h2 {
+    margin: 0;
+    color: #fff7ed;
+}
+
+.hero-copy h1 {
+    font-size: clamp(2.25rem, 5vw, 4.75rem);
+    line-height: 0.95;
+    max-width: 10ch;
+}
+
+.hero-text,
+.status-note,
+.canvas-hint,
+.checklist,
+.token-list {
+    color: #cbd5e1;
+}
+
+.hero-text {
+    margin: 18px 0 0;
+    font-size: 1.05rem;
+    line-height: 1.7;
+    max-width: 56ch;
+}
+
+.status-card strong {
+    display: block;
+    color: #fff;
+    font-size: 1.5rem;
+    line-height: 1.25;
+}
+
+.status-note {
+    margin: 14px 0 0;
+    line-height: 1.6;
+}
+
+.workspace-grid {
+    display: grid;
+    gap: 24px;
+    grid-template-columns: 320px minmax(0, 1fr);
+}
+
+.sidebar-card,
+.canvas-card {
+    border-radius: 30px;
+    padding: 24px;
+}
+
+.sidebar-card {
+    display: grid;
+    gap: 24px;
+    align-content: start;
+}
+
+.token-list,
+.checklist {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.token-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.token-list li,
+.checklist li {
+    border: 1px solid rgba(251, 146, 60, 0.25);
+    background: rgba(251, 146, 60, 0.08);
+}
+
+.token-list li {
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 0.95rem;
+}
+
+.checklist-card {
+    border-radius: 22px;
+    background: rgba(30, 41, 59, 0.72);
+    padding: 18px;
+}
+
+.checklist {
+    display: grid;
+    gap: 10px;
+}
+
+.checklist li {
+    border-radius: 14px;
+    padding: 12px 14px;
+}
+
+.canvas-header {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 18px;
+}
+
+.canvas-hint {
+    margin: 0;
+    max-width: 34ch;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    text-align: right;
+}
+
+.canvas-frame {
+    height: 68vh;
+    min-height: 520px;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 24px;
+    background:
+        linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+}
+
+.react-flow__node {
+    width: 180px;
+    border: 1px solid rgba(251, 146, 60, 0.35);
+    border-radius: 18px;
+    background: linear-gradient(180deg, #1e293b, #0f172a);
+    box-shadow: 0 20px 40px rgba(15, 23, 42, 0.45);
+    color: #fff7ed;
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1.45;
+    text-align: left;
+    white-space: pre-line;
+}
+
+.react-flow__node-default,
+.react-flow__node-input,
+.react-flow__node-output,
+.react-flow__node-group {
+    padding: 16px;
+}
+
+.react-flow__edge-path {
+    stroke: #fb923c;
+    stroke-width: 2;
+}
+
+.react-flow__controls,
+.react-flow__minimap {
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 16px;
+    overflow: hidden;
+    background: rgba(15, 23, 42, 0.9);
+}
+
+@media (max-width: 960px) {
+    .app-shell {
+        padding: 18px;
+    }
+
+    .hero-panel,
+    .workspace-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .canvas-header {
+        align-items: start;
+        flex-direction: column;
+    }
+
+    .canvas-hint {
+        max-width: none;
+        text-align: left;
+    }
+
+    .canvas-frame {
+        height: 56vh;
+        min-height: 420px;
+    }
+}
