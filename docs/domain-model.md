@@ -4,9 +4,10 @@
 
 PacketTracerでは、ネットワーク構成を以下の要素で表現する。
 
-- Project
+- NetworkProject
 - Device
-- Interface
+- NetworkCloud
+- DeviceInterface
 - Link
 - RouteEntry
 - SimulationResult
@@ -24,11 +25,11 @@ NetworkProject
 - updated_at
 ```
 
-1つのプロジェクトに複数の機器、接続、ルート情報を持つ。
+1つのプロジェクトに複数の機器、ネットワーククラウド、接続、ルート情報を持つ。
 
 ## Device
 
-PC、スイッチ、ルータ、インターネット雲などの機器を表す。
+PC、スイッチ、ルータ、ファイアウォールなどの物理・論理機器を表す。
 
 ```text
 Device
@@ -39,6 +40,7 @@ Device
 - position_x
 - position_y
 - default_gateway
+- metadata_json
 - created_at
 - updated_at
 ```
@@ -49,18 +51,77 @@ Device
 pc
 switch
 router
-internet
+firewall
 ```
 
 ### 補足
 
 PCのデフォルトゲートウェイはDeviceに持たせる。
 
-ルータのデフォルトルートはRouteEntryとして持たせる。
+RouterとFirewallのデフォルトルートはRouteEntryとして持たせる。
+
+Firewallは初期実装ではRouterに近いL3機器として扱うが、将来のポリシー制御拡張を考慮してDevice typeを分ける。
+
+## NetworkCloud
+
+InternetやMaster'sONEのような、機器ではなくネットワークそのものを表す抽象要素。
+
+```text
+NetworkCloud
+- id
+- network_project_id
+- name
+- type
+- position_x
+- position_y
+- representative_ip
+- network_address
+- subnet_mask
+- metadata_json
+- created_at
+- updated_at
+```
+
+### type
+
+```text
+internet
+masters_one
+wan
+```
+
+### Internet Cloud
+
+インターネット側を表すクラウド。
+
+代表IPを設定できる。
+
+```text
+Internet Cloud
+- representative_ip: 8.8.8.8
+```
+
+初期実装では、RouterまたはFirewallに `0.0.0.0/0` のdefault routeがあり、next hopへ到達できればInternet到達可能とみなす。
+
+### Master'sONE Cloud
+
+NTTコミュニケーションズのMaster'sONEのような閉域網・WANサービスを表すクラウド。
+
+Master'sONEはPCやルータのような単体機器ではなく、拠点間をつなぐ閉域網そのものとして扱う。
+
+```text
+Master'sONE Cloud
+- network_address: 172.16.0.0
+- subnet_mask: 255.255.0.0
+```
+
+Master'sONE Cloudには複数のRouterまたはFirewallを接続できる。
+
+初期実装では、RouterまたはFirewallにMaster'sONE向け静的ルートがあり、接続されたCloudへ到達できれば到達可能とみなす。
 
 ## DeviceInterface
 
-機器が持つインターフェースを表す。
+Deviceが持つインターフェースを表す。
 
 ```text
 DeviceInterface
@@ -77,15 +138,16 @@ DeviceInterface
 
 ```text
 PC-A eth0 192.168.10.10 255.255.255.0
-Router-1 eth0 192.168.10.1 255.255.255.0
-Router-1 eth1 192.168.20.1 255.255.255.0
+Firewall-1 lan 192.168.10.1 255.255.255.0
+Firewall-1 wan 10.0.0.2 255.255.255.252
+Router-Branch wan 10.0.0.6 255.255.255.252
 ```
 
 L2スイッチは初期段階ではIPを持たなくてもよい。
 
 ## Link
 
-インターフェース同士の接続を表す。
+DeviceInterface同士、またはDeviceInterfaceとNetworkCloudの接続を表す。
 
 ```text
 Link
@@ -93,11 +155,19 @@ Link
 - network_project_id
 - interface_a_id
 - interface_b_id
+- network_cloud_id
 - created_at
 - updated_at
 ```
 
-初期段階では、リンクは常に有効なケーブルとして扱う。
+初期段階では、リンクは常に有効なケーブルまたはWAN接続として扱う。
+
+以下のどちらかを表現する。
+
+```text
+DeviceInterface <-> DeviceInterface
+DeviceInterface <-> NetworkCloud
+```
 
 将来的には以下を追加する可能性がある。
 
@@ -105,11 +175,12 @@ Link
 - status: up / down
 - cable_type
 - bandwidth
+- provider
 ```
 
 ## RouteEntry
 
-ルータの静的ルーティング情報を表す。
+RouterまたはFirewallの静的ルーティング情報を表す。
 
 ```text
 RouteEntry
@@ -126,9 +197,9 @@ RouteEntry
 例：
 
 ```text
-Router-1
-192.168.20.0 255.255.255.0 via 192.168.30.2
-0.0.0.0 0.0.0.0 via 192.168.30.254
+Firewall-1
+0.0.0.0 0.0.0.0 via 203.0.113.1
+172.16.0.0 255.255.0.0 via 10.0.0.1
 ```
 
 ## SimulationResult
@@ -164,8 +235,9 @@ Hop
 
 ```text
 PC-A: 宛先は別ネットワークのためデフォルトゲートウェイへ送信
-Router-1: 192.168.20.0/24 へのルートを発見
-Router-2: 宛先ネットワークに接続
+Firewall-1: Master'sONE向けルート 172.16.0.0/16 を発見
+Master'sONE Cloud: 閉域網クラウドへ到達
+Branch-Router: 拠点LANへのルートを確認
 PC-B: 到達
 ```
 
@@ -177,9 +249,12 @@ NetworkProject
   │   ├─ DeviceInterface
   │   └─ RouteEntry
   │
+  ├─ NetworkCloud
+  │
   └─ Link
       ├─ interface_a_id -> DeviceInterface
-      └─ interface_b_id -> DeviceInterface
+      ├─ interface_b_id -> DeviceInterface
+      └─ network_cloud_id -> NetworkCloud
 ```
 
 ## 初期データ例
@@ -193,13 +268,21 @@ PC-A
 
 SW-1
 
-Router-1
-- eth0: 192.168.10.1/24
-- eth1: 192.168.20.1/24
+Firewall-1
+- lan: 192.168.10.1/24
+- wan: 10.0.0.2/30
+- route: 172.16.0.0/16 via 10.0.0.1
+
+Master'sONE Cloud
+- network: 172.16.0.0/16
+
+Branch-Router
+- wan: 10.0.0.6/30
+- lan: 192.168.20.1/24
 
 PC-B
 - eth0: 192.168.20.10/24
 - default gateway: 192.168.20.1
 ```
 
-この構成では、PC-AからPC-Bへのpingが成功する。
+この構成では、PC-AからMaster'sONE Cloudを経由してPC-Bへ到達する流れを表現できる。
