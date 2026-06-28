@@ -6,9 +6,9 @@
 
 目的は、社内ネットワーク構成の理解と障害切り分け練習である。
 
-実際のパケット送信やCisco IOS風CLIの再現は行わない。
+実際のパケット送信、Cisco IOS風CLI、MQTTシミュレーションは行わない。
 
-GUI上にネットワーク機器を配置し、IPアドレス、サブネットマスク、デフォルトゲートウェイ、静的ルーティング、機器間接続を設定し、端末間のping可否を論理的に判定する。
+GUI上にネットワーク機器とネットワーククラウドを配置し、IPアドレス、サブネットマスク、デフォルトゲートウェイ、静的ルーティング、機器間接続を設定し、端末間または端末から外部ネットワークへのping可否を論理的に判定する。
 
 ## 最重要方針
 
@@ -17,20 +17,28 @@ GUI上にネットワーク機器を配置し、IPアドレス、サブネット
 最初のゴールは以下である。
 
 ```text
-Internet / MastersOne
-        |
-     Firewall
-        |
-      Switch
-      /    \
-    PC-A   PC-B
+Internet Cloud
+      |
+   Firewall
+      |
+    Switch
+   /      \
+ PC-A    PC-B
+
+Master'sONE Cloud
+      |
+   Firewall
+      |
+    Switch
+      |
+    PC-A
 ```
 
 この構成で、以下を判定できるようにする。
 
 - PC-A から PC-B にpingできるか
-- PC-A から Internet に出られるか
-- PC-A から MastersOne に到達できるか
+- PC-A から Internet Cloud に出られるか
+- PC-A から Master'sONE Cloud に到達できるか
 - 設定ミスがある場合、どこで失敗したかを表示する
 
 ## 採用アーキテクチャ
@@ -44,6 +52,63 @@ Internet / MastersOne
 - React Flow
 - MySQL
 
+## 設計上の重要概念
+
+### Device
+
+PC、Switch、Router、Firewallなどの機器を表す。
+
+Device typeは以下とする。
+
+```text
+pc
+switch
+router
+firewall
+```
+
+### NetworkCloud
+
+InternetやMaster'sONEのような、単体機器ではなくネットワークそのものを表す抽象ノード。
+
+NetworkCloud typeは以下とする。
+
+```text
+internet
+masters_one
+wan
+```
+
+### Master'sONEの扱い
+
+Master'sONEはNTTコミュニケーションズの法人向け閉域ネットワークサービスを想定する。
+
+ただし、このアプリでは実サービス仕様そのものは再現しない。
+
+Master'sONEはPCやルータのような機器ではなく、本社・支店・データセンター・クラウドなどを接続する閉域網クラウドとして扱う。
+
+したがって、`masters_one` は Device type ではなく NetworkCloud type とする。
+
+```text
+Head Office LAN
+    |
+Firewall
+    |
+Master'sONE Cloud
+    |
+Branch Router
+    |
+Branch LAN
+```
+
+初期実装では、Master'sONE Cloudは以下の役割を持つ。
+
+- 複数のRouterまたはFirewallを接続できる
+- 自身は通常端末のIPを持たない
+- route_entriesの宛先ネットワークとして扱える
+- Internet Cloudとは別の外部ネットワークとして表示する
+- 閉域網やWANサービスを抽象的に表現する
+
 ## 初期実装の優先順位
 
 ### 優先度A
@@ -55,8 +120,9 @@ Internet / MastersOne
 - React Flow導入
 - MySQL接続
 - ネットワークエディタ画面
-- Device / Interface / Link / RouteEntry のDBモデル
-- PC / Switch / Router / Firewall / Internet / MastersOne のノード表示
+- Device / NetworkCloud / Interface / Link / RouteEntry のDBモデル
+- PC / Switch / Router / Firewall のDeviceノード表示
+- Internet Cloud / Master'sONE Cloud のNetworkCloudノード表示
 - ノード配置と接続
 - IP設定パネル
 - pingシミュレーションAPI
@@ -70,6 +136,7 @@ Internet / MastersOne
 - 失敗理由の詳細表示
 - 戻り経路不足の判定
 - default routeの判定
+- Master'sONE向け静的ルートの判定
 - 入力バリデーション強化
 
 ### 優先度C
@@ -80,6 +147,7 @@ Internet / MastersOne
 - DHCP
 - DNS
 - NATの詳細再現
+- Firewallポリシー
 - ACL
 - STP
 - 実パケット送信
@@ -87,7 +155,7 @@ Internet / MastersOne
 - Cisco IOS風CLI
 - 複数ユーザー認証
 
-## 登場機器
+## 登場要素
 
 ### PC
 
@@ -135,8 +203,8 @@ WANからLANへの入り口に置く境界機器を表す。
 設定項目：
 
 - name
-- wan_interface
 - lan_interface
+- wan_interface
 - route_entries
 - default_route
 
@@ -144,9 +212,9 @@ WANからLANへの入り口に置く境界機器を表す。
 
 ただし、将来拡張しやすいようにDevice typeとして `firewall` を持たせる。
 
-### Internet
+### Internet Cloud
 
-インターネット側を表す抽象ノード。
+インターネット側を表すNetworkCloud。
 
 設定項目：
 
@@ -156,55 +224,30 @@ WANからLANへの入り口に置く境界機器を表す。
 例：
 
 ```text
-Internet: 8.8.8.8
+Internet Cloud: 8.8.8.8
 ```
 
-初期実装では、FirewallまたはRouterにdefault routeがあれば到達可能とみなす。
+初期実装では、FirewallまたはRouterに `0.0.0.0/0` のdefault routeがあり、next hopまたはInternet Cloudへ到達できればInternet到達可能とみなす。
 
-### MastersOne
+### Master'sONE Cloud
 
-閉域網、WANサービス、外部ネットワークサービスを表す抽象ノード。
-
-実サービスの詳細再現は行わない。
-
-このアプリ上では、Internetとは別の外部ネットワークとして扱う。
-
-用途：
-
-- 拠点間ネットワーク
-- 閉域網
-- WAN側ネットワーク
-- 社内LANから外部サービス網へ到達できるかの確認
+閉域網、WANサービス、外部ネットワークサービスを表すNetworkCloud。
 
 設定項目：
 
 - name
 - network_address
 - subnet_mask
-- gateway_ip
 
 例：
 
 ```text
-MastersOne
+Master'sONE Cloud
 network: 172.16.0.0
 mask: 255.255.0.0
 ```
 
-初期実装では、MastersOneは `external_network` として扱う。
-
-Device typeは `masters_one` とする。
-
-## Device type一覧
-
-```text
-pc
-switch
-router
-firewall
-internet
-masters_one
-```
+初期実装では、RouterまたはFirewallにMaster'sONE向けの静的ルートが存在し、接続されたMaster'sONE Cloudへ到達できれば到達可能とみなす。
 
 ## DB設計方針
 
@@ -233,21 +276,56 @@ created_at
 updated_at
 ```
 
-`metadata_json` には、InternetやMastersOneなど通常機器と少し違う情報を格納してよい。
+`type` は以下のみを許可する。
 
-例：
+```text
+pc
+switch
+router
+firewall
+```
+
+### network_clouds
+
+```text
+id
+network_project_id
+name
+type
+position_x
+position_y
+representative_ip
+network_address
+subnet_mask
+metadata_json
+created_at
+updated_at
+```
+
+`type` は以下のみを許可する。
+
+```text
+internet
+masters_one
+wan
+```
+
+Internet Cloudの例：
 
 ```json
 {
+  "type": "internet",
   "representative_ip": "8.8.8.8"
 }
 ```
 
+Master'sONE Cloudの例：
+
 ```json
 {
+  "type": "masters_one",
   "network_address": "172.16.0.0",
-  "subnet_mask": "255.255.0.0",
-  "gateway_ip": "172.16.0.1"
+  "subnet_mask": "255.255.0.0"
 }
 ```
 
@@ -270,9 +348,23 @@ id
 network_project_id
 interface_a_id
 interface_b_id
+network_cloud_id
 created_at
 updated_at
 ```
+
+以下のどちらかを表現する。
+
+```text
+DeviceInterface <-> DeviceInterface
+DeviceInterface <-> NetworkCloud
+```
+
+実装上は以下の制約を守る。
+
+- interface_a_id は必須
+- interface_b_id または network_cloud_id のどちらか一方のみを持つ
+- interface_b_id と network_cloud_id を同時に持たない
 
 ### route_entries
 
@@ -287,6 +379,8 @@ created_at
 updated_at
 ```
 
+RouteEntryはRouterまたはFirewallに紐づく。
+
 ## 画面要件
 
 ### NetworkEditor
@@ -296,29 +390,34 @@ updated_at
 構成：
 
 ```text
-+--------------------------------------------------+
-| Toolbar                                          |
-| [PC] [Switch] [Router] [Firewall] [Internet]     |
-| [MastersOne] [Save]                              |
-+-------------------------------+------------------+
-|                               | Property Panel   |
-|        React Flow Canvas      |                  |
-|                               | Ping Panel       |
-+-------------------------------+------------------+
-| Simulation Result                                |
-+--------------------------------------------------+
++-----------------------------------------------------------+
+| Toolbar                                                   |
+| [PC] [Switch] [Router] [Firewall]                         |
+| [Internet Cloud] [Master'sONE Cloud] [Save]               |
++--------------------------------------+--------------------+
+|                                      | Property Panel     |
+|           React Flow Canvas          |                    |
+|                                      | Ping Panel         |
++--------------------------------------+--------------------+
+| Simulation Result                                         |
++-----------------------------------------------------------+
 ```
 
 ### Toolbar
 
 以下のノードを追加できるようにする。
 
+Device：
+
 - PC
 - Switch
 - Router
 - Firewall
-- Internet
-- MastersOne
+
+NetworkCloud：
+
+- Internet Cloud
+- Master'sONE Cloud
 
 ### PropertyPanel
 
@@ -337,17 +436,16 @@ Router / Firewallの場合：
 - interfaces
 - route_entries
 
-Internetの場合：
+Internet Cloudの場合：
 
 - name
 - representative_ip
 
-MastersOneの場合：
+Master'sONE Cloudの場合：
 
 - name
 - network_address
 - subnet_mask
-- gateway_ip
 
 ### PingPanel
 
@@ -356,9 +454,15 @@ MastersOneの場合：
 - source_device_id
 - destination_type
 - destination_device_id
+- destination_cloud_id
 - destination_ip
 
-宛先は、PC、Internet、MastersOneを選べるようにする。
+宛先は以下を選べるようにする。
+
+- PC
+- Internet Cloud
+- Master'sONE Cloud
+- 任意IPアドレス
 
 ## シミュレーション仕様
 
@@ -379,7 +483,7 @@ DB上の構成情報をもとに、到達性を論理的に判定する。
 7. default gatewayが送信元と同一ネットワーク内にあるか確認する
 8. default gatewayを持つRouterまたはFirewallを探す
 9. Router/Firewallのroute_entriesから宛先への経路を探す
-10. next_hopをたどる
+10. next_hopまたはNetworkCloudをたどる
 11. 宛先に到達できるか判定する
 12. 戻り経路が必要な場合は逆方向も確認する
 13. 成功または失敗理由を返す
@@ -400,12 +504,12 @@ Firewallは以下の特徴を持つRouterとして扱う。
 例：
 
 ```text
-Firewallにdefault routeが設定されていないため、Internetへ到達できません。
+Firewallにdefault routeが設定されていないため、Internet Cloudへ到達できません。
 ```
 
-### Internetの扱い
+### Internet Cloudの扱い
 
-Internetは代表IPを持つ外部ノードとする。
+Internet Cloudは代表IPを持つ外部ネットワーククラウドとする。
 
 例：
 
@@ -413,11 +517,11 @@ Internetは代表IPを持つ外部ノードとする。
 8.8.8.8
 ```
 
-FirewallまたはRouterに `0.0.0.0/0` のdefault routeがあり、next_hopに到達できればInternet到達可能とみなす。
+FirewallまたはRouterに `0.0.0.0/0` のdefault routeがあり、next_hopまたはInternet Cloudへ到達できればInternet到達可能とみなす。
 
-### MastersOneの扱い
+### Master'sONE Cloudの扱い
 
-MastersOneは外部ネットワークを表す抽象ノードとする。
+Master'sONE Cloudは閉域網・WANを表すNetworkCloudとする。
 
 例：
 
@@ -425,14 +529,14 @@ MastersOneは外部ネットワークを表す抽象ノードとする。
 172.16.0.0/16
 ```
 
-RouterまたはFirewallにMastersOne向けの静的ルートが存在し、next_hopへ到達できれば到達可能とみなす。
+RouterまたはFirewallにMaster'sONE向けの静的ルートが存在し、outgoing_interfaceがMaster'sONE Cloudへ接続されている、またはnext_hopをたどってMaster'sONE Cloudへ到達できれば到達可能とみなす。
 
 例：
 
 ```text
 destination_network: 172.16.0.0
 subnet_mask: 255.255.0.0
-next_hop: 10.0.0.2
+next_hop: 10.0.0.1
 ```
 
 ## SimulationResultレスポンス例
@@ -450,11 +554,11 @@ next_hop: 10.0.0.2
     },
     {
       "device": "Firewall-1",
-      "message": "0.0.0.0/0 のdefault routeを使用します。"
+      "message": "172.16.0.0/16 への静的ルートを使用します。"
     },
     {
-      "device": "Internet",
-      "message": "宛先に到達しました。"
+      "device": "Master'sONE Cloud",
+      "message": "閉域網クラウドへ到達しました。"
     }
   ],
   "suggestions": []
@@ -466,7 +570,7 @@ next_hop: 10.0.0.2
 ```json
 {
   "success": false,
-  "message": "Internetへ到達できません。",
+  "message": "Master'sONE Cloudへ到達できません。",
   "hops": [
     {
       "device": "PC-A",
@@ -478,13 +582,13 @@ next_hop: 10.0.0.2
     },
     {
       "device": "Firewall-1",
-      "message": "default routeがありません。"
+      "message": "172.16.0.0/16 への静的ルートがありません。"
     }
   ],
-  "error_code": "DEFAULT_ROUTE_MISSING",
+  "error_code": "MASTERS_ONE_ROUTE_MISSING",
   "suggestions": [
-    "Firewallに 0.0.0.0/0 のルートを追加してください。",
-    "WAN側next hopが正しいか確認してください。"
+    "Firewallに 172.16.0.0/16 宛ての静的ルートを追加してください。",
+    "Master'sONE Cloudへ接続するWAN側interfaceが正しいか確認してください。"
   ]
 }
 ```
@@ -500,17 +604,19 @@ DEFAULT_GATEWAY_MISSING
 DEFAULT_GATEWAY_OUT_OF_SUBNET
 GATEWAY_DEVICE_NOT_FOUND
 LINK_NOT_CONNECTED
+CLOUD_NOT_CONNECTED
 ROUTE_NOT_FOUND
 NEXT_HOP_NOT_FOUND
 RETURN_ROUTE_NOT_FOUND
 DEFAULT_ROUTE_MISSING
+MASTERS_ONE_ROUTE_MISSING
 INVALID_IP_ADDRESS
 INVALID_SUBNET_MASK
 ```
 
 ## 初期サンプル構成
 
-### 正常系: LANからInternet
+### 正常系: LANからInternet Cloud
 
 ```text
 PC-A
@@ -525,11 +631,11 @@ Firewall-1
 - wan: 203.0.113.2/30
 - default route: 0.0.0.0/0 via 203.0.113.1
 
-Internet
+Internet Cloud
 - representative_ip: 8.8.8.8
 ```
 
-### 正常系: LANからMastersOne
+### 正常系: LANからMaster'sONE Cloud
 
 ```text
 PC-A
@@ -542,9 +648,27 @@ Firewall-1
 - wan: 10.0.0.2/30
 - route: 172.16.0.0/16 via 10.0.0.1
 
-MastersOne
+Master'sONE Cloud
 - network: 172.16.0.0
 - mask: 255.255.0.0
+```
+
+### 将来想定: 本社から支店LAN
+
+```text
+HeadOffice-PC
+  |
+HeadOffice-Switch
+  |
+HeadOffice-Firewall
+  |
+Master'sONE Cloud
+  |
+Branch-Router
+  |
+Branch-Switch
+  |
+Branch-PC
 ```
 
 ## 実装順序
@@ -554,23 +678,27 @@ MastersOne
 1. Laravel + Inertia + React + TypeScriptの初期セットアップ
 2. React Flowで空のエディタ画面を表示
 3. Device type定義を作成
-4. PC / Switch / Router / Firewall / Internet / MastersOneノードを追加可能にする
-5. DBマイグレーションを作成
-6. 構成保存APIを作成
-7. 構成読み込みAPIを作成
-8. PropertyPanelで設定編集
-9. PingSimulationControllerを作成
-10. PingSimulatorサービスを作成
-11. IP計算処理を作成
-12. route解決処理を作成
-13. 結果表示パネルを作成
-14. サンプル構成を作成
+4. NetworkCloud type定義を作成
+5. PC / Switch / Router / Firewallノードを追加可能にする
+6. Internet Cloud / Master'sONE Cloudノードを追加可能にする
+7. DBマイグレーションを作成
+8. 構成保存APIを作成
+9. 構成読み込みAPIを作成
+10. PropertyPanelで設定編集
+11. PingSimulationControllerを作成
+12. PingSimulatorサービスを作成
+13. IP計算処理を作成
+14. route解決処理を作成
+15. NetworkCloud到達判定を作成
+16. 結果表示パネルを作成
+17. サンプル構成を作成
 
 ## 注意事項
 
 - 最初から完璧なネットワークシミュレータを目指さないこと
 - Firewallのポリシー制御は初期実装しないこと
-- MastersOneは実サービス再現ではなく、外部ネットワーク抽象として扱うこと
+- Master'sONEは実サービス再現ではなく、NetworkCloudとして扱うこと
+- Master'sONEをDeviceとして実装しないこと
 - VLAN、NAT、DHCP、DNSは後回しにすること
 - 通信判定の説明文を丁寧に出すこと
 - 失敗理由は情シス初学者が読んで理解できる日本語にすること
@@ -581,10 +709,12 @@ Codexの初回実装では、最低限以下を満たすこと。
 
 - アプリが起動する
 - ネットワークエディタ画面が表示される
-- PC / Switch / Firewall / Internet / MastersOne を配置できる
+- PC / Switch / Firewall / Internet Cloud / Master'sONE Cloud を配置できる
 - ノード同士を接続できる
 - PCにIP、mask、gatewayを設定できる
 - FirewallにLAN/WAN interfaceとrouteを設定できる
-- PCからInternetへのping判定ができる
-- PCからMastersOneへのping判定ができる
+- Internet Cloudにrepresentative_ipを設定できる
+- Master'sONE Cloudにnetwork_addressとsubnet_maskを設定できる
+- PCからInternet Cloudへのping判定ができる
+- PCからMaster'sONE Cloudへのping判定ができる
 - 成功/失敗と理由が画面に表示される
