@@ -28,3 +28,39 @@
 ## 方針
 
 最初からPacket Tracer全体を再現するのではなく、まずは情シス実務で重要なL3到達性確認と障害切り分けに絞って実装します。
+
+## ローカル実行方針
+
+WSL は開発作業用のワークスペースとして扱い、常設の実行環境にはしません。
+
+現時点の最小実行構成は以下です。
+
+- PHP / Composer: Docker Compose 上の `app` サービス
+- Web: Laravel 開発サーバー (`php artisan serve`)
+- Frontend: Docker Compose 上の `vite` サービス
+- DB: sqlite
+
+Nginx + php-fpm + MySQL は、保存 API と ping シミュレーションが固まってから追加します。
+
+## 起動手順
+
+初回セットアップ:
+
+```bash
+docker compose up --build app vite
+```
+
+起動後のアクセス先:
+
+- アプリ: `http://localhost:8000`
+- Vite: `http://localhost:5173`
+
+`app` サービスは初回起動時に以下を自動実行します。
+
+- `.env` が無ければ `.env.example` から作成
+- `database/database.sqlite` の作成
+- `composer install`
+- `php artisan key:generate`
+- `php artisan migrate`
+
+詳細は [docs/local-development.md](docs/local-development.md) を参照してください。
