@@ -105,6 +105,14 @@ body {
     line-height: 1.6;
 }
 
+.status-strip {
+    display: grid;
+    gap: 8px;
+    margin-top: 18px;
+    color: #cbd5e1;
+    font-size: 0.92rem;
+}
+
 .workspace-grid {
     display: grid;
     gap: 24px;
@@ -121,6 +129,9 @@ body {
     display: grid;
     gap: 24px;
     align-content: start;
+    max-height: 68vh;
+    min-height: 520px;
+    overflow: auto;
 }
 
 .token-list,
@@ -154,9 +165,82 @@ body {
     padding: 18px;
 }
 
+.selected-card {
+    border-radius: 22px;
+    background: rgba(30, 41, 59, 0.72);
+    padding: 18px;
+}
+
 .checklist {
     display: grid;
     gap: 10px;
+}
+
+.editor-actions,
+.field-stack,
+.detail-section {
+    display: grid;
+    gap: 12px;
+}
+
+.action-button {
+    border: 1px solid rgba(251, 146, 60, 0.3);
+    border-radius: 14px;
+    background: rgba(15, 23, 42, 0.86);
+    color: #fff7ed;
+    cursor: pointer;
+    font: inherit;
+    padding: 12px 14px;
+}
+
+.action-button.primary {
+    background: linear-gradient(180deg, #ea580c, #c2410c);
+    border-color: rgba(251, 146, 60, 0.55);
+}
+
+.action-button:disabled {
+    cursor: wait;
+    opacity: 0.75;
+}
+
+.field-group {
+    display: grid;
+    gap: 8px;
+    color: #cbd5e1;
+    font-size: 0.92rem;
+}
+
+.editor-input {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.95);
+    color: #fff7ed;
+    font: inherit;
+    padding: 10px 12px;
+}
+
+.editor-textarea {
+    min-height: 80px;
+    resize: vertical;
+}
+
+.detail-heading {
+    color: #fdba74;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.detail-card {
+    display: grid;
+    gap: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 16px;
+    background: rgba(15, 23, 42, 0.5);
+    padding: 12px;
 }
 
 .checklist li {
