@@ -1,3 +1,7 @@
+export type DeviceType = 'pc' | 'switch' | 'router' | 'firewall';
+
+export type NetworkCloudType = 'internet' | 'masters_one' | 'wan';
+
 export type TopologyInterface = {
     client_id: string;
     name: string;
@@ -16,7 +20,7 @@ export type TopologyDevice = {
     id?: number;
     client_id: string;
     name: string;
-    type: string;
+    type: DeviceType;
     position_x: number;
     position_y: number;
     default_gateway: string | null;
@@ -29,7 +33,7 @@ export type TopologyCloud = {
     id?: number;
     client_id: string;
     name: string;
-    type: string;
+    type: NetworkCloudType;
     position_x: number;
     position_y: number;
     representative_ip: string | null;

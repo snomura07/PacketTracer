@@ -11,8 +11,14 @@ import {
     type Node,
     type ReactFlowInstance,
 } from 'reactflow';
+import PingPanel from '../Components/PingPanel';
+import ProjectPanel from '../Components/ProjectPanel';
+import ProjectToolbar from '../Components/ProjectToolbar';
 import TopologyNode from '../Components/TopologyNode';
+import TopologyContextMenu from '../Components/TopologyContextMenu';
 import type {
+    DeviceType,
+    NetworkCloudType,
     RouteEntry,
     SimulationResult,
     TopologyCloud,
@@ -247,7 +253,7 @@ const buildDeviceLabel = (device: TopologyDevice): string => {
 const getSwitchMode = (device: TopologyDevice): 'l2' | 'l3' =>
     device.type === 'switch' && device.metadata_json?.switch_mode === 'l3' ? 'l3' : 'l2';
 
-const deviceTypeLabel = (type: string): string => {
+const deviceTypeLabel = (type: DeviceType | NetworkCloudType): string => {
     switch (type) {
         case 'pc':
             return 'PC';
@@ -359,7 +365,7 @@ const buildEdges = (project: TopologyProject): Edge[] => {
 };
 
 const createDeviceTemplate = (
-    type: string,
+    type: DeviceType,
     position: { x: number; y: number },
 ): TopologyDevice => {
     const deviceId = nextClientId(`device-${type}`);
@@ -410,7 +416,7 @@ const createDeviceTemplate = (
 };
 
 const createCloudTemplate = (
-    type: string,
+    type: NetworkCloudType,
     position: { x: number; y: number },
 ): TopologyCloud => ({
     client_id: nextClientId(`cloud-${type}`),
@@ -811,7 +817,7 @@ export default function NetworkEditor() {
         }
     };
 
-    const addDevice = (type: string, position: FlowPosition = nextDevicePosition) => {
+    const addDevice = (type: DeviceType, position: FlowPosition = nextDevicePosition) => {
         const device = createDeviceTemplate(type, position);
 
         setProject((currentProject) => ({
@@ -824,7 +830,10 @@ export default function NetworkEditor() {
         setStatusMessage(`${device.name} を追加しました`);
     };
 
-    const addCloud = (type: string, position: FlowPosition = nextCloudPosition) => {
+    const addCloud = (
+        type: NetworkCloudType,
+        position: FlowPosition = nextCloudPosition,
+    ) => {
         const cloud = createCloudTemplate(type, position);
 
         setProject((currentProject) => ({
@@ -1150,57 +1159,31 @@ export default function NetworkEditor() {
             <main className="app-shell">
                 <section className="workspace-grid">
                     <section className="canvas-card">
-                        <div className="canvas-toolbar">
-                            <div className="canvas-toolbar-copy">
-                                <p className="eyebrow">{props.appName}</p>
-                                <p className="canvas-toolbar-meta">
-                                    {selectedType
-                                        ? `選択中: ${selectedLabel} (${deviceTypeLabel(selectedType)})`
-                                        : '左クリックで編集、右クリックで操作メニューを開きます'}
-                                </p>
-                                <p className={`canvas-toolbar-status status-banner is-${statusTone}`}>
-                                    {statusMessage}
-                                </p>
-                            </div>
-                            <div className="canvas-toolbar-actions">
-                                <button
-                                    type="button"
-                                    className="action-button primary"
-                                    onClick={saveProject}
-                                    disabled={isSaving}
-                                >
-                                    {isSaving ? '保存中...' : '保存'}
-                                </button>
-                                <button
-                                    type="button"
-                                    className="action-button"
-                                    onClick={reloadProject}
-                                    disabled={isReloading}
-                                >
-                                    {isReloading ? '再読込中...' : '再読込'}
-                                </button>
-                                <button
-                                    type="button"
-                                    className="action-button"
-                                    onClick={() => {
-                                        setProjectId(null);
-                                        setProject(initialProject());
-                                        setSelectedNodeId('device-router-1');
-                                        setIsEditorOpen(false);
-                                        setContextMenu(null);
-                                        setPingSourceDeviceId(null);
-                                        setPingDestinationId(null);
-                                        setSimulationResult(null);
-                                        resetLinkMode();
-                                        setStatusMessage(
-                                            'サンプルトポロジーに戻しました',
-                                        );
-                                    }}
-                                >
-                                    リセット
-                                </button>
-                            </div>
-                        </div>
+                        <ProjectToolbar
+                            appName={props.appName}
+                            selectedTypeLabel={
+                                selectedType ? deviceTypeLabel(selectedType) : null
+                            }
+                            selectedLabel={selectedLabel}
+                            statusTone={statusTone}
+                            statusMessage={statusMessage}
+                            isSaving={isSaving}
+                            isReloading={isReloading}
+                            onSave={saveProject}
+                            onReload={reloadProject}
+                            onReset={() => {
+                                setProjectId(null);
+                                setProject(initialProject());
+                                setSelectedNodeId('device-router-1');
+                                setIsEditorOpen(false);
+                                setContextMenu(null);
+                                setPingSourceDeviceId(null);
+                                setPingDestinationId(null);
+                                setSimulationResult(null);
+                                resetLinkMode();
+                                setStatusMessage('サンプルトポロジーに戻しました');
+                            }}
+                        />
 
                         <div className="canvas-header">
                             <div>
@@ -1339,263 +1322,81 @@ export default function NetworkEditor() {
                             )}
                         </div>
 
-                        <div className="selected-card">
-                            <p className="panel-label">Ping シミュレーション</p>
-                            <div className="field-stack">
-                                <label className="field-group">
-                                    <span>送信元 PC</span>
-                                    <select
-                                        className="editor-input"
-                                        value={pingSourceDeviceId ?? ''}
-                                        onChange={(event) =>
-                                            setPingSourceDeviceId(
-                                                event.target.value === ''
-                                                    ? null
-                                                    : Number(event.target.value),
-                                            )
-                                        }
-                                    >
-                                        <option value="">送信元を選択</option>
-                                        {pingSourceOptions.map((device) => (
-                                            <option key={device.id} value={device.id}>
-                                                {device.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </label>
-                                <label className="field-group">
-                                    <span>宛先種別</span>
-                                    <select
-                                        className="editor-input"
-                                        value={pingDestinationType}
-                                        onChange={(event) => {
-                                            const nextType = event.target.value as 'device' | 'cloud';
-                                            setPingDestinationType(nextType);
-                                            setPingDestinationId(
-                                                nextType === 'cloud'
-                                                    ? (pingDestinationCloudOptions[0]?.id ?? null)
-                                                    : (pingDestinationDeviceOptions.find(
-                                                          (device) => device.id !== pingSourceDeviceId,
-                                                      )?.id ?? null),
-                                            );
-                                        }}
-                                    >
-                                        <option value="device">PC</option>
-                                        <option value="cloud">クラウド</option>
-                                    </select>
-                                </label>
-                                <label className="field-group">
-                                    <span>宛先</span>
-                                    <select
-                                        className="editor-input"
-                                        value={pingDestinationId ?? ''}
-                                        onChange={(event) =>
-                                            setPingDestinationId(
-                                                event.target.value === ''
-                                                    ? null
-                                                    : Number(event.target.value),
-                                            )
-                                        }
-                                    >
-                                        <option value="">宛先を選択</option>
-                                        {pingDestinationType === 'device'
-                                            ? pingDestinationDeviceOptions
-                                                  .filter((device) => device.id !== pingSourceDeviceId)
-                                                  .map((device) => (
-                                                      <option key={device.id} value={device.id}>
-                                                          {device.name}
-                                                      </option>
-                                                  ))
-                                            : pingDestinationCloudOptions.map((cloud) => (
-                                                  <option key={cloud.id} value={cloud.id}>
-                                                      {cloud.name}
-                                                  </option>
-                                              ))}
-                                    </select>
-                                </label>
-                                <button
-                                    type="button"
-                                    className="action-button primary"
-                                    onClick={runPingSimulation}
-                                    disabled={isSimulating}
-                                >
-                                    {isSimulating ? '実行中...' : 'Ping 実行'}
-                                </button>
-                            </div>
+                        <PingPanel
+                            pingSourceDeviceId={pingSourceDeviceId}
+                            pingDestinationType={pingDestinationType}
+                            pingDestinationId={pingDestinationId}
+                            pingSourceOptions={pingSourceOptions}
+                            pingDestinationDeviceOptions={pingDestinationDeviceOptions}
+                            pingDestinationCloudOptions={pingDestinationCloudOptions}
+                            isSimulating={isSimulating}
+                            simulationResult={simulationResult}
+                            onPingSourceDeviceIdChange={setPingSourceDeviceId}
+                            onPingDestinationTypeChange={(nextType) => {
+                                setPingDestinationType(nextType);
+                                setPingDestinationId(
+                                    nextType === 'cloud'
+                                        ? (pingDestinationCloudOptions[0]?.id ?? null)
+                                        : (pingDestinationDeviceOptions.find(
+                                              (device) => device.id !== pingSourceDeviceId,
+                                          )?.id ?? null),
+                                );
+                            }}
+                            onPingDestinationIdChange={setPingDestinationId}
+                            onRunPingSimulation={runPingSimulation}
+                        />
 
-                            {simulationResult && (
-                                <div className="simulation-card">
-                                    <div className={`simulation-banner ${simulationResult.success ? 'is-success' : 'is-failure'}`}>
-                                        {simulationResult.success
-                                            ? `成功: ${simulationResult.destination}`
-                                            : `失敗: ${simulationResult.error_code}`}
-                                    </div>
-                                    {simulationResult.error_message && (
-                                        <p className="selected-summary-text">
-                                            {simulationResult.error_message}
-                                        </p>
-                                    )}
-                                    <div className="detail-section">
-                                        <span className="detail-heading">経路</span>
-                                        {simulationResult.hops.map((hop, index) => (
-                                            <div key={`${hop.device_name}-${index}`} className="detail-card">
-                                                <strong>{hop.device_name}</strong>
-                                                <span className="hop-meta">
-                                                    {hop.action} / {hop.result}
-                                                </span>
-                                                <span>{hop.message}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                    {simulationResult.suggestions.length > 0 && (
-                                        <div className="detail-section">
-                                            <span className="detail-heading">改善案</span>
-                                            {simulationResult.suggestions.map((suggestion) => (
-                                                <div key={suggestion} className="inline-link-row">
-                                                    <span>{suggestion}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="selected-card">
-                            <p className="panel-label">プロジェクト</p>
-                            <div className="field-stack">
-                                <label className="field-group">
-                                    <span>名称</span>
-                                    <input
-                                        className="editor-input"
-                                        value={project.name}
-                                        onChange={(event) =>
-                                            setProject((currentProject) => ({
-                                                ...currentProject,
-                                                name: event.target.value,
-                                            }))
-                                        }
-                                    />
-                                </label>
-                                <label className="field-group">
-                                    <span>説明</span>
-                                    <textarea
-                                        className="editor-input editor-textarea"
-                                        value={project.description ?? ''}
-                                        onChange={(event) =>
-                                            setProject((currentProject) => ({
-                                                ...currentProject,
-                                                description: event.target.value,
-                                            }))
-                                        }
-                                    />
-                                </label>
-                            </div>
-                        </div>
+                        <ProjectPanel
+                            name={project.name}
+                            description={project.description}
+                            onNameChange={(value) =>
+                                setProject((currentProject) => ({
+                                    ...currentProject,
+                                    name: value,
+                                }))
+                            }
+                            onDescriptionChange={(value) =>
+                                setProject((currentProject) => ({
+                                    ...currentProject,
+                                    description: value,
+                                }))
+                            }
+                        />
 
                     </aside>
                 </section>
 
                 {contextMenu && (
-                    <div
-                        className="context-menu"
-                        style={{
-                            left: `${contextMenu.screenX}px`,
-                            top: `${contextMenu.screenY}px`,
+                    <TopologyContextMenu
+                        contextMenu={contextMenu}
+                        canAddInterface={
+                            selectedDevice?.client_id === contextMenu.targetNodeId
+                        }
+                        onAddDevice={addDevice}
+                        onAddCloud={addCloud}
+                        onEditNode={(nodeId) => {
+                            setSelectedNodeId(nodeId);
+                            setIsEditorOpen(true);
+                            setContextMenu(null);
                         }}
-                    >
-                        {contextMenu.targetNodeId === null ? (
-                            <>
-                                <button
-                                    type="button"
-                                    className="context-menu-item"
-                                    onClick={() => addDevice('pc', contextMenu.flowPosition)}
-                                >
-                                    PC を追加
-                                </button>
-                                <button
-                                    type="button"
-                                    className="context-menu-item"
-                                    onClick={() => addDevice('switch', contextMenu.flowPosition)}
-                                >
-                                    スイッチを追加
-                                </button>
-                                <button
-                                    type="button"
-                                    className="context-menu-item"
-                                    onClick={() => addDevice('router', contextMenu.flowPosition)}
-                                >
-                                    ルータを追加
-                                </button>
-                                <button
-                                    type="button"
-                                    className="context-menu-item"
-                                    onClick={() => addDevice('firewall', contextMenu.flowPosition)}
-                                >
-                                    ファイアウォールを追加
-                                </button>
-                                <button
-                                    type="button"
-                                    className="context-menu-item"
-                                    onClick={() => addCloud('internet', contextMenu.flowPosition)}
-                                >
-                                    Internet クラウドを追加
-                                </button>
-                                <button
-                                    type="button"
-                                    className="context-menu-item"
-                                    onClick={() => addCloud('masters_one', contextMenu.flowPosition)}
-                                >
-                                    Master'sONE クラウドを追加
-                                </button>
-                            </>
-                        ) : (
-                            <>
-                                <button
-                                    type="button"
-                                    className="context-menu-item"
-                                    onClick={() => {
-                                        setSelectedNodeId(contextMenu.targetNodeId ?? '');
-                                        setIsEditorOpen(true);
-                                        setContextMenu(null);
-                                    }}
-                                >
-                                    ノードを編集
-                                </button>
-                                {selectedDevice && selectedDevice.client_id === contextMenu.targetNodeId && (
-                                    <button
-                                        type="button"
-                                        className="context-menu-item"
-                                        onClick={() => {
-                                            updateSelectedDevice((device) => ({
-                                                ...device,
-                                                interfaces: [
-                                                    ...device.interfaces,
-                                                    {
-                                                        client_id: nextClientId(`${device.client_id}-iface`),
-                                                        name: `if${device.interfaces.length}`,
-                                                        ip_address: null,
-                                                        subnet_mask: null,
-                                                    },
-                                                ],
-                                            }));
-                                            setIsEditorOpen(true);
-                                            setContextMenu(null);
-                                        }}
-                                    >
-                                        インターフェースを追加
-                                    </button>
-                                )}
-                                <button
-                                    type="button"
-                                    className="context-menu-item danger"
-                                    onClick={() => removeNode(contextMenu.targetNodeId ?? '')}
-                                >
-                                    ノードを削除
-                                </button>
-                            </>
-                        )}
-                    </div>
+                        onAddInterface={() => {
+                            updateSelectedDevice((device) => ({
+                                ...device,
+                                interfaces: [
+                                    ...device.interfaces,
+                                    {
+                                        client_id: nextClientId(`${device.client_id}-iface`),
+                                        name: `if${device.interfaces.length}`,
+                                        ip_address: null,
+                                        subnet_mask: null,
+                                    },
+                                ],
+                            }));
+                            setIsEditorOpen(true);
+                            setContextMenu(null);
+                        }}
+                        onDeleteNode={removeNode}
+                    />
                 )}
 
                 {isEditorOpen && (selectedDevice || selectedCloud) && (
