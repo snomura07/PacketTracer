@@ -12,7 +12,6 @@ import {
     type ReactFlowInstance,
 } from 'reactflow';
 import PingPanel from '../Components/PingPanel';
-import ProjectPanel from '../Components/ProjectPanel';
 import ProjectToolbar from '../Components/ProjectToolbar';
 import TopologyNode from '../Components/TopologyNode';
 import TopologyContextMenu from '../Components/TopologyContextMenu';
@@ -565,10 +564,10 @@ export default function NetworkEditor() {
             };
         });
     const pingSourceOptions = project.devices.filter(
-        (device) => device.id !== undefined && device.type === 'pc',
+        (device) => device.type === 'pc' && device.id !== undefined,
     );
     const pingDestinationDeviceOptions = project.devices.filter(
-        (device) => device.id !== undefined && device.type === 'pc',
+        (device) => device.type === 'pc' && device.id !== undefined,
     );
     const pingDestinationCloudOptions = project.network_clouds.filter(
         (cloud) => cloud.id !== undefined,
@@ -588,6 +587,74 @@ export default function NetworkEditor() {
 
         return () => window.removeEventListener('keydown', handleKeydown);
     }, []);
+
+    useEffect(() => {
+        if (pingSourceOptions.length === 0) {
+            if (pingSourceDeviceId !== null) {
+                setPingSourceDeviceId(null);
+            }
+
+            return;
+        }
+
+        if (
+            pingSourceDeviceId === null ||
+            !pingSourceOptions.some((device) => device.id === pingSourceDeviceId)
+        ) {
+            setPingSourceDeviceId(pingSourceOptions[0]?.id ?? null);
+        }
+    }, [pingSourceDeviceId, pingSourceOptions]);
+
+    useEffect(() => {
+        if (projectId === null) {
+            return;
+        }
+
+        if (pingDestinationType === 'cloud') {
+            if (pingDestinationCloudOptions.length === 0) {
+                if (pingDestinationId !== null) {
+                    setPingDestinationId(null);
+                }
+
+                return;
+            }
+
+            if (
+                pingDestinationId === null ||
+                !pingDestinationCloudOptions.some((cloud) => cloud.id === pingDestinationId)
+            ) {
+                setPingDestinationId(pingDestinationCloudOptions[0]?.id ?? null);
+            }
+
+            return;
+        }
+
+        const availableDevices = pingDestinationDeviceOptions.filter(
+            (device) => device.id !== pingSourceDeviceId,
+        );
+
+        if (availableDevices.length === 0) {
+            if (pingDestinationId !== null) {
+                setPingDestinationId(null);
+            }
+
+            return;
+        }
+
+        if (
+            pingDestinationId === null ||
+            !availableDevices.some((device) => device.id === pingDestinationId)
+        ) {
+            setPingDestinationId(availableDevices[0]?.id ?? null);
+        }
+    }, [
+        pingDestinationCloudOptions,
+        pingDestinationDeviceOptions,
+        pingDestinationId,
+        pingDestinationType,
+        pingSourceDeviceId,
+        projectId,
+    ]);
 
     const resolveFlowPosition = (
         clientX: number,
@@ -1269,60 +1336,8 @@ export default function NetworkEditor() {
                     </section>
 
                     <aside className="sidebar-card">
-                        <div className="selected-summary-card">
-                            <div className="selected-summary-head">
-                                <div>
-                                    <p className="panel-label">ワークスペース</p>
-                                    <strong className="selected-summary-title">{project.name}</strong>
-                                </div>
-                                {props.milestone && (
-                                    <span className="selected-summary-badge">
-                                        {props.milestone}
-                                    </span>
-                                )}
-                            </div>
-                            <p className="selected-summary-text">
-                                キャンバス上で右クリックすると機器追加、ノード上で右クリックすると編集や削除を開けます。
-                            </p>
-                            {selectedType && (
-                                <p className="selected-summary-text">
-                                    選択中: <strong>{selectedLabel}</strong> ({deviceTypeLabel(selectedType)})
-                                </p>
-                            )}
-                            {(pendingLinkInterfaceId !== null ||
-                                pendingLinkTargetNodeId !== null) && (
-                                <div className="pending-link-card">
-                                    <span className="detail-heading">接続準備中</span>
-                                    {selectedInterface && (
-                                        <p className="selected-summary-text">
-                                            接続元: <strong>{selectedInterface.name}</strong>
-                                        </p>
-                                    )}
-                                    {pendingTargetDevice && (
-                                        <p className="selected-summary-text">
-                                            接続先: <strong>{pendingTargetDevice.name}</strong>
-                                        </p>
-                                    )}
-                                    {pendingTargetCloud && (
-                                        <p className="selected-summary-text">
-                                            接続先クラウド: <strong>{pendingTargetCloud.name}</strong>
-                                        </p>
-                                    )}
-                                    <button
-                                        type="button"
-                                        className="action-button"
-                                        onClick={() => {
-                                            resetLinkMode();
-                                            setStatusMessage('接続モードを解除しました');
-                                        }}
-                                    >
-                                        接続モードを解除
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-
                         <PingPanel
+                            projectId={projectId}
                             pingSourceDeviceId={pingSourceDeviceId}
                             pingDestinationType={pingDestinationType}
                             pingDestinationId={pingDestinationId}
@@ -1344,23 +1359,6 @@ export default function NetworkEditor() {
                             }}
                             onPingDestinationIdChange={setPingDestinationId}
                             onRunPingSimulation={runPingSimulation}
-                        />
-
-                        <ProjectPanel
-                            name={project.name}
-                            description={project.description}
-                            onNameChange={(value) =>
-                                setProject((currentProject) => ({
-                                    ...currentProject,
-                                    name: value,
-                                }))
-                            }
-                            onDescriptionChange={(value) =>
-                                setProject((currentProject) => ({
-                                    ...currentProject,
-                                    description: value,
-                                }))
-                            }
                         />
 
                     </aside>
