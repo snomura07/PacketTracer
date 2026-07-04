@@ -8,7 +8,7 @@
 
 ## 採用する最小構成
 
-- `app`: PHP 8.3 CLI + Composer
+- `app`: PHP 8.4 CLI + Composer
 - `vite`: Node 24 + Vite
 - DB: sqlite
 - Web: Laravel 開発サーバー (`php artisan serve`)
