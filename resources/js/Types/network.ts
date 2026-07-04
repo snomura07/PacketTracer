@@ -54,3 +54,20 @@ export type TopologyProject = {
     network_clouds: TopologyCloud[];
     links: TopologyLink[];
 };
+
+export type SimulationHop = {
+    device_name: string;
+    action: string;
+    result: string;
+    message: string;
+};
+
+export type SimulationResult = {
+    success: boolean;
+    source_device: string | null;
+    destination: string | null;
+    hops: SimulationHop[];
+    error_code: string | null;
+    error_message: string | null;
+    suggestions: string[];
+};
