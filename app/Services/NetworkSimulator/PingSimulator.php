@@ -30,13 +30,13 @@ class PingSimulator
             return $this->failure('SOURCE_NOT_FOUND', 'Source device was not found.', []);
         }
 
-        $sourceInterface = $source->interfaces->first();
-        if (!$sourceInterface instanceof DeviceInterface || !$sourceInterface->ip_address || !$sourceInterface->subnet_mask) {
+        $sourceInterfaces = $this->usableIpInterfaces($source);
+        if ($sourceInterfaces->isEmpty()) {
             return $this->failure(
                 'SOURCE_IP_MISSING',
                 'Source device does not have a usable IP interface.',
                 [
-                    $this->hop($source->name, 'validate-source', 'failed', 'No IP address is configured on the source interface.'),
+                    $this->hop($source->name, 'validate-source', 'failed', 'No usable IP interface is configured on the source device.'),
                 ],
             );
         }
@@ -48,27 +48,23 @@ class PingSimulator
                 return $this->failure('DESTINATION_NOT_FOUND', 'Destination device was not found.', []);
             }
 
-            $destinationInterface = $destination->interfaces->first();
-            if (
-                !$destinationInterface instanceof DeviceInterface ||
-                !$destinationInterface->ip_address ||
-                !$destinationInterface->subnet_mask
-            ) {
+            $destinationInterfaces = $this->usableIpInterfaces($destination);
+            if ($destinationInterfaces->isEmpty()) {
                 return $this->failure(
                     'DESTINATION_IP_MISSING',
                     'Destination device does not have a usable IP interface.',
                     [
-                        $this->hop($destination->name, 'validate-destination', 'failed', 'No IP address is configured on the destination interface.'),
+                        $this->hop($destination->name, 'validate-destination', 'failed', 'No usable IP interface is configured on the destination device.'),
                     ],
                 );
             }
 
-            return $this->simulateToDevice(
+            return $this->simulateAcrossDeviceInterfaces(
                 $project,
                 $source,
-                $sourceInterface,
+                $sourceInterfaces,
                 $destination,
-                $destinationInterface,
+                $destinationInterfaces,
             );
         }
 
@@ -77,7 +73,78 @@ class PingSimulator
             return $this->failure('DESTINATION_NOT_FOUND', 'Destination cloud was not found.', []);
         }
 
-        return $this->simulateToCloud($project, $source, $sourceInterface, $cloud);
+        return $this->simulateAcrossSourceInterfacesToCloud($project, $source, $sourceInterfaces, $cloud);
+    }
+
+    private function simulateAcrossDeviceInterfaces(
+        NetworkProject $project,
+        Device $source,
+        Collection $sourceInterfaces,
+        Device $destination,
+        Collection $destinationInterfaces,
+    ): array {
+        $firstFailure = null;
+
+        foreach ($sourceInterfaces as $sourceInterface) {
+            if (!$sourceInterface instanceof DeviceInterface) {
+                continue;
+            }
+
+            foreach ($destinationInterfaces as $destinationInterface) {
+                if (!$destinationInterface instanceof DeviceInterface) {
+                    continue;
+                }
+
+                $result = $this->simulateToDevice(
+                    $project,
+                    $source,
+                    $sourceInterface,
+                    $destination,
+                    $destinationInterface,
+                );
+
+                if (($result['success'] ?? false) === true) {
+                    return $result;
+                }
+
+                $firstFailure ??= $result;
+            }
+        }
+
+        return $firstFailure ?? $this->failure(
+            'SOURCE_IP_MISSING',
+            'Source device does not have a usable IP interface.',
+            [],
+        );
+    }
+
+    private function simulateAcrossSourceInterfacesToCloud(
+        NetworkProject $project,
+        Device $source,
+        Collection $sourceInterfaces,
+        NetworkCloud $cloud,
+    ): array {
+        $firstFailure = null;
+
+        foreach ($sourceInterfaces as $sourceInterface) {
+            if (!$sourceInterface instanceof DeviceInterface) {
+                continue;
+            }
+
+            $result = $this->simulateToCloud($project, $source, $sourceInterface, $cloud);
+
+            if (($result['success'] ?? false) === true) {
+                return $result;
+            }
+
+            $firstFailure ??= $result;
+        }
+
+        return $firstFailure ?? $this->failure(
+            'SOURCE_IP_MISSING',
+            'Source device does not have a usable IP interface.',
+            [],
+        );
     }
 
     private function simulateToDevice(
@@ -87,6 +154,7 @@ class PingSimulator
         Device $destination,
         DeviceInterface $destinationInterface,
     ): array {
+        $arpTable = [];
         $hops = [
             $this->hop(
                 $source->name,
@@ -109,9 +177,28 @@ class PingSimulator
             );
 
             if ($this->isLayer2Reachable($project, $sourceInterface->id, $destinationInterface->id)) {
+                $arpResolution = $this->resolveArpEntry(
+                    $project,
+                    $sourceInterface,
+                    $destinationInterface->ip_address,
+                );
+
+                if (!$arpResolution['success']) {
+                    $hops[] = $this->hop($source->name, 'arp', 'failed', $arpResolution['message']);
+
+                    return $this->failure(
+                        'ARP_TARGET_UNRESOLVED',
+                        'Destination MAC address could not be resolved.',
+                        $hops,
+                        $arpTable,
+                    );
+                }
+
+                $arpTable[] = $arpResolution['entry'];
+                $hops[] = $this->hop($source->name, 'arp', 'ok', $arpResolution['message']);
                 $hops[] = $this->hop($destination->name, 'deliver', 'ok', 'Destination interface is reachable on the same L2 path.');
 
-                return $this->success($source->name, $destination->name, $hops);
+                return $this->success($source->name, $destination->name, $hops, $arpTable);
             }
 
             $hops[] = $this->hop($source->name, 'same-subnet-check', 'failed', 'Destination is in the same subnet but no cable/L2 path exists.');
@@ -145,8 +232,23 @@ class PingSimulator
         if (!$this->isLayer2Reachable($project, $sourceInterface->id, $gatewayInterface->id)) {
             $hops[] = $this->hop($source->name, 'gateway-resolution', 'failed', 'Default gateway exists but is not L2 reachable.');
 
-            return $this->failure('GATEWAY_NOT_REACHABLE', 'Default gateway is not reachable on the current topology.', $hops);
+            return $this->failure('GATEWAY_NOT_REACHABLE', 'Default gateway is not reachable on the current topology.', $hops, $arpTable);
         }
+
+        $gatewayArpResolution = $this->resolveArpEntry($project, $sourceInterface, $source->default_gateway);
+        if (!$gatewayArpResolution['success']) {
+            $hops[] = $this->hop($source->name, 'arp', 'failed', $gatewayArpResolution['message']);
+
+            return $this->failure(
+                'GATEWAY_ARP_UNRESOLVED',
+                'Default gateway MAC address could not be resolved.',
+                $hops,
+                $arpTable,
+            );
+        }
+
+        $arpTable[] = $gatewayArpResolution['entry'];
+        $hops[] = $this->hop($source->name, 'arp', 'ok', $gatewayArpResolution['message']);
 
         $gatewayDevice = $project->devices->firstWhere('id', $gatewayInterface->device_id);
         $hops[] = $this->hop(
@@ -164,19 +266,38 @@ class PingSimulator
         $hops = [...$hops, ...$routeDecision['hops']];
 
         if (!$routeDecision['success']) {
-            return $this->failure($routeDecision['error_code'], $routeDecision['error_message'], $hops);
+            return $this->failure($routeDecision['error_code'], $routeDecision['error_message'], $hops, $arpTable);
         }
 
         /** @var DeviceInterface|null $exitInterface */
         $exitInterface = $routeDecision['exit_interface'];
         if (!$exitInterface instanceof DeviceInterface) {
-            return $this->failure('EXIT_INTERFACE_MISSING', 'No exit interface was selected for the route.', $hops);
+            return $this->failure('EXIT_INTERFACE_MISSING', 'No exit interface was selected for the route.', $hops, $arpTable);
+        }
+
+        $nextHopIp = $routeDecision['next_hop_ip'];
+        if (is_string($nextHopIp)) {
+            $nextHopArpResolution = $this->resolveArpEntry($project, $exitInterface, $nextHopIp);
+
+            if (!$nextHopArpResolution['success']) {
+                $hops[] = $this->hop($gatewayDevice->name, 'arp', 'failed', $nextHopArpResolution['message']);
+
+                return $this->failure(
+                    'NEXT_HOP_ARP_UNRESOLVED',
+                    'Next-hop MAC address could not be resolved.',
+                    $hops,
+                    $arpTable,
+                );
+            }
+
+            $arpTable[] = $nextHopArpResolution['entry'];
+            $hops[] = $this->hop($gatewayDevice->name, 'arp', 'ok', $nextHopArpResolution['message']);
         }
 
         if (!$this->isLayer2Reachable($project, $exitInterface->id, $destinationInterface->id)) {
             $hops[] = $this->hop($gatewayDevice->name, 'deliver', 'failed', 'Route exists but destination interface is not reachable on L2 from the exit interface.');
 
-            return $this->failure('DESTINATION_L2_UNREACHABLE', 'Route exists but the destination interface is not reachable on the current links.', $hops);
+            return $this->failure('DESTINATION_L2_UNREACHABLE', 'Route exists but the destination interface is not reachable on the current links.', $hops, $arpTable);
         }
 
         $hops[] = $this->hop($destination->name, 'deliver', 'ok', 'Destination reached through routed path.');
@@ -184,12 +305,12 @@ class PingSimulator
         if (!$this->hasReturnPath($project, $destination, $destinationInterface, $sourceInterface->ip_address)) {
             $hops[] = $this->hop($destination->name, 'return-path', 'failed', 'No return path to the source network was found.');
 
-            return $this->failure('RETURN_PATH_MISSING', 'Destination does not have a return path to the source network.', $hops);
+            return $this->failure('RETURN_PATH_MISSING', 'Destination does not have a return path to the source network.', $hops, $arpTable);
         }
 
         $hops[] = $this->hop($destination->name, 'return-path', 'ok', 'Return path to the source network exists.');
 
-        return $this->success($source->name, $destination->name, $hops);
+        return $this->success($source->name, $destination->name, $hops, $arpTable);
     }
 
     private function simulateToCloud(
@@ -198,6 +319,7 @@ class PingSimulator
         DeviceInterface $sourceInterface,
         NetworkCloud $cloud,
     ): array {
+        $arpTable = [];
         $hops = [
             $this->hop(
                 $source->name,
@@ -223,8 +345,23 @@ class PingSimulator
         if (!$this->isLayer2Reachable($project, $sourceInterface->id, $gatewayInterface->id)) {
             $hops[] = $this->hop($source->name, 'gateway-resolution', 'failed', 'Default gateway exists but is not L2 reachable.');
 
-            return $this->failure('GATEWAY_NOT_REACHABLE', 'Default gateway is not reachable on the current topology.', $hops);
+            return $this->failure('GATEWAY_NOT_REACHABLE', 'Default gateway is not reachable on the current topology.', $hops, $arpTable);
         }
+
+        $gatewayArpResolution = $this->resolveArpEntry($project, $sourceInterface, $source->default_gateway);
+        if (!$gatewayArpResolution['success']) {
+            $hops[] = $this->hop($source->name, 'arp', 'failed', $gatewayArpResolution['message']);
+
+            return $this->failure(
+                'GATEWAY_ARP_UNRESOLVED',
+                'Default gateway MAC address could not be resolved.',
+                $hops,
+                $arpTable,
+            );
+        }
+
+        $arpTable[] = $gatewayArpResolution['entry'];
+        $hops[] = $this->hop($source->name, 'arp', 'ok', $gatewayArpResolution['message']);
 
         $gatewayDevice = $project->devices->firstWhere('id', $gatewayInterface->device_id);
         $hops[] = $this->hop(
@@ -242,12 +379,12 @@ class PingSimulator
         $hops = [...$hops, ...$cloudDecision['hops']];
 
         if (!$cloudDecision['success']) {
-            return $this->failure($cloudDecision['error_code'], $cloudDecision['error_message'], $hops);
+            return $this->failure($cloudDecision['error_code'], $cloudDecision['error_message'], $hops, $arpTable);
         }
 
         $hops[] = $this->hop($cloud->name, 'deliver', 'ok', 'Cloud destination reached.');
 
-        return $this->success($source->name, $cloud->name, $hops);
+        return $this->success($source->name, $cloud->name, $hops, $arpTable);
     }
 
     private function resolveDeviceRoute(NetworkProject $project, Device $router, string $destinationIp): array
@@ -265,6 +402,7 @@ class PingSimulator
                 return [
                     'success' => true,
                     'exit_interface' => $interface,
+                    'next_hop_ip' => $destinationIp,
                     'hops' => $hops,
                     'error_code' => null,
                     'error_message' => null,
@@ -279,6 +417,7 @@ class PingSimulator
             return [
                 'success' => false,
                 'exit_interface' => null,
+                'next_hop_ip' => null,
                 'hops' => $hops,
                 'error_code' => 'ROUTE_NOT_FOUND',
                 'error_message' => 'No route to the destination network was found.',
@@ -292,6 +431,7 @@ class PingSimulator
             return [
                 'success' => false,
                 'exit_interface' => null,
+                'next_hop_ip' => null,
                 'hops' => $hops,
                 'error_code' => 'OUTGOING_INTERFACE_MISSING',
                 'error_message' => 'The matched route does not specify a usable outgoing interface.',
@@ -314,6 +454,7 @@ class PingSimulator
         return [
             'success' => true,
             'exit_interface' => $interface,
+            'next_hop_ip' => $route->next_hop ?? $destinationIp,
             'hops' => $hops,
             'error_code' => null,
             'error_message' => null,
@@ -600,6 +741,16 @@ class PingSimulator
         return (int) ($interface->metadata_json['vlan_id'] ?? 1);
     }
 
+    private function usableIpInterfaces(Device $device): Collection
+    {
+        return $device->interfaces
+            ->filter(
+                fn (DeviceInterface $interface) =>
+                    $interface->ip_address !== null && $interface->subnet_mask !== null,
+            )
+            ->values();
+    }
+
     private function findInterfaceByIp(Collection $devices, string $ipAddress): ?DeviceInterface
     {
         foreach ($devices as $device) {
@@ -648,7 +799,50 @@ class PingSimulator
         return substr_count($binary, '1');
     }
 
-    private function success(string $sourceDevice, string $destination, array $hops): array
+    private function resolveArpEntry(
+        NetworkProject $project,
+        DeviceInterface $requesterInterface,
+        string $targetIp,
+    ): array {
+        $resolvedInterface = $this->findInterfaceByIp($project->devices, $targetIp);
+
+        if (!$resolvedInterface instanceof DeviceInterface) {
+            return [
+                'success' => false,
+                'entry' => null,
+                'message' => sprintf('No interface owns IP %s for ARP resolution.', $targetIp),
+            ];
+        }
+
+        if (!$resolvedInterface->mac_address) {
+            return [
+                'success' => false,
+                'entry' => null,
+                'message' => sprintf('Interface %s has no MAC address configured.', $resolvedInterface->name),
+            ];
+        }
+
+        $device = $project->devices->firstWhere('id', $resolvedInterface->device_id);
+        $deviceName = $device instanceof Device ? $device->name : 'unknown';
+
+        return [
+            'success' => true,
+            'entry' => [
+                'device_name' => $deviceName,
+                'interface_name' => $resolvedInterface->name,
+                'ip_address' => $targetIp,
+                'mac_address' => $resolvedInterface->mac_address,
+            ],
+            'message' => sprintf(
+                '%s resolved %s to %s.',
+                $requesterInterface->name,
+                $targetIp,
+                $resolvedInterface->mac_address,
+            ),
+        ];
+    }
+
+    private function success(string $sourceDevice, string $destination, array $hops, array $arpTable = []): array
     {
         return [
             'success' => true,
@@ -658,10 +852,11 @@ class PingSimulator
             'error_code' => null,
             'error_message' => null,
             'suggestions' => [],
+            'arp_table' => $arpTable,
         ];
     }
 
-    private function failure(string $errorCode, string $message, array $hops): array
+    private function failure(string $errorCode, string $message, array $hops, array $arpTable = []): array
     {
         return [
             'success' => false,
@@ -671,6 +866,7 @@ class PingSimulator
             'error_code' => $errorCode,
             'error_message' => $message,
             'suggestions' => $this->suggestionsForError($errorCode),
+            'arp_table' => $arpTable,
         ];
     }
 
@@ -693,6 +889,7 @@ class PingSimulator
             'RETURN_PATH_MISSING' => ['Check the destination default gateway and reverse route.'],
             'L2_PATH_MISSING', 'DESTINATION_L2_UNREACHABLE' => ['Check the cable or switch path between the interfaces.'],
             'CLOUD_LINK_MISSING' => ['Connect the route interface to the expected cloud.'],
+            'ARP_TARGET_UNRESOLVED', 'GATEWAY_ARP_UNRESOLVED', 'NEXT_HOP_ARP_UNRESOLVED' => ['Check whether the target interface has a valid IP/MAC configuration and is reachable on the expected segment.'],
             default => [],
         };
     }

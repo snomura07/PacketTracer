@@ -69,6 +69,7 @@ class NetworkProjectController extends Controller
             'devices.*.interfaces.*.name' => ['required', 'string', 'max:255'],
             'devices.*.interfaces.*.ip_address' => ['nullable', 'ip'],
             'devices.*.interfaces.*.subnet_mask' => ['nullable', 'ip'],
+            'devices.*.interfaces.*.mac_address' => ['nullable', 'regex:/^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$/'],
             'devices.*.interfaces.*.metadata_json' => ['nullable', 'array'],
             'devices.*.route_entries' => ['nullable', 'array'],
             'devices.*.route_entries.*.destination_network' => ['required', 'ip'],

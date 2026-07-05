@@ -18,6 +18,7 @@ class NetworkProjectApiTest extends TestCase
         $response->assertCreated()
             ->assertJsonPath('project.name', 'HQ Internet Access')
             ->assertJsonPath('project.devices.0.name', 'PC-A')
+            ->assertJsonPath('project.devices.0.interfaces.0.mac_address', '02:00:00:00:10:10')
             ->assertJsonPath('project.devices.1.interfaces.1.name', 'wan0')
             ->assertJsonPath('project.network_clouds.0.type', 'internet')
             ->assertJsonPath('project.links.1.network_cloud_client_id', 'cloud-1');
@@ -159,6 +160,7 @@ class NetworkProjectApiTest extends TestCase
                             'name' => 'eth0',
                             'ip_address' => '192.168.10.10',
                             'subnet_mask' => '255.255.255.0',
+                            'mac_address' => '02:00:00:00:10:10',
                             'metadata_json' => [],
                         ],
                     ],
@@ -178,6 +180,7 @@ class NetworkProjectApiTest extends TestCase
                             'name' => 'lan0',
                             'ip_address' => '192.168.10.1',
                             'subnet_mask' => '255.255.255.0',
+                            'mac_address' => '02:00:00:00:20:01',
                             'metadata_json' => [],
                         ],
                         [
@@ -185,6 +188,7 @@ class NetworkProjectApiTest extends TestCase
                             'name' => 'wan0',
                             'ip_address' => '203.0.113.2',
                             'subnet_mask' => '255.255.255.252',
+                            'mac_address' => '02:00:00:00:20:02',
                             'metadata_json' => [],
                         ],
                     ],

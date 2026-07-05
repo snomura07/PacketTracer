@@ -16,6 +16,7 @@ class DeviceInterface extends Model
         'name',
         'ip_address',
         'subnet_mask',
+        'mac_address',
         'metadata_json',
     ];
 
