@@ -8,7 +8,15 @@ export type TopologyInterface = {
     name: string;
     ip_address: string | null;
     subnet_mask: string | null;
+    mac_address: string | null;
     metadata_json: Record<string, unknown>;
+};
+
+export type ArpTableEntry = {
+    device_name: string;
+    interface_name: string;
+    ip_address: string;
+    mac_address: string;
 };
 
 export type RouteEntry = {
@@ -86,4 +94,5 @@ export type SimulationResult = {
     error_code: string | null;
     error_message: string | null;
     suggestions: string[];
+    arp_table: ArpTableEntry[];
 };

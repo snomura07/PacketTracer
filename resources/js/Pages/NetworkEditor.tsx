@@ -11,11 +11,13 @@ import {
     type Node,
     type ReactFlowInstance,
 } from 'reactflow';
+import ArpTablePanel from '../Components/ArpTablePanel';
 import PingPanel from '../Components/PingPanel';
 import ProjectToolbar from '../Components/ProjectToolbar';
 import TopologyNode from '../Components/TopologyNode';
 import TopologyContextMenu from '../Components/TopologyContextMenu';
 import type {
+    ArpTableEntry,
     DeviceType,
     NetworkCloudType,
     RouteEntry,
@@ -56,6 +58,14 @@ const SWITCH_PORT_COUNT_OPTIONS = [8, 24, 48] as const;
 const nextClientId = (prefix: string): string =>
     `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 
+const nextMacAddress = (): string =>
+    ['02', ...Array.from({ length: 5 }, () =>
+        Math.floor(Math.random() * 256)
+            .toString(16)
+            .padStart(2, '0')
+            .toUpperCase(),
+    )].join(':');
+
 const initialProject = (): TopologyProject => ({
     name: '疎通確認ラボ',
     description: 'PC-A から Internet と Master\'sONE へ接続する最小構成トポロジー',
@@ -74,6 +84,7 @@ const initialProject = (): TopologyProject => ({
                     name: 'eth0',
                     ip_address: '192.168.10.10',
                     subnet_mask: '255.255.255.0',
+                    mac_address: '02:00:00:00:10:10',
                     metadata_json: {},
                 },
             ],
@@ -96,6 +107,7 @@ const initialProject = (): TopologyProject => ({
                     name: 'port1',
                     ip_address: null,
                     subnet_mask: null,
+                    mac_address: '02:00:00:00:20:01',
                     metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
                 {
@@ -103,6 +115,7 @@ const initialProject = (): TopologyProject => ({
                     name: 'port2',
                     ip_address: null,
                     subnet_mask: null,
+                    mac_address: '02:00:00:00:20:02',
                     metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
                 {
@@ -110,6 +123,7 @@ const initialProject = (): TopologyProject => ({
                     name: 'port3',
                     ip_address: null,
                     subnet_mask: null,
+                    mac_address: '02:00:00:00:20:03',
                     metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
                 {
@@ -117,6 +131,7 @@ const initialProject = (): TopologyProject => ({
                     name: 'port4',
                     ip_address: null,
                     subnet_mask: null,
+                    mac_address: '02:00:00:00:20:04',
                     metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
                 {
@@ -124,6 +139,7 @@ const initialProject = (): TopologyProject => ({
                     name: 'port5',
                     ip_address: null,
                     subnet_mask: null,
+                    mac_address: '02:00:00:00:20:05',
                     metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
                 {
@@ -131,6 +147,7 @@ const initialProject = (): TopologyProject => ({
                     name: 'port6',
                     ip_address: null,
                     subnet_mask: null,
+                    mac_address: '02:00:00:00:20:06',
                     metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
                 {
@@ -138,6 +155,7 @@ const initialProject = (): TopologyProject => ({
                     name: 'port7',
                     ip_address: null,
                     subnet_mask: null,
+                    mac_address: '02:00:00:00:20:07',
                     metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
                 {
@@ -145,6 +163,7 @@ const initialProject = (): TopologyProject => ({
                     name: 'port8',
                     ip_address: null,
                     subnet_mask: null,
+                    mac_address: '02:00:00:00:20:08',
                     metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
             ],
@@ -164,6 +183,7 @@ const initialProject = (): TopologyProject => ({
                     name: 'lan0',
                     ip_address: '192.168.10.1',
                     subnet_mask: '255.255.255.0',
+                    mac_address: '02:00:00:00:30:01',
                     metadata_json: {},
                 },
                 {
@@ -171,6 +191,7 @@ const initialProject = (): TopologyProject => ({
                     name: 'wan0',
                     ip_address: '203.0.113.2',
                     subnet_mask: '255.255.255.252',
+                    mac_address: '02:00:00:00:30:02',
                     metadata_json: {},
                 },
                 {
@@ -178,6 +199,7 @@ const initialProject = (): TopologyProject => ({
                     name: 'wan1',
                     ip_address: '10.0.0.1',
                     subnet_mask: '255.255.255.252',
+                    mac_address: '02:00:00:00:30:03',
                     metadata_json: {},
                 },
             ],
@@ -306,6 +328,7 @@ const createSwitchInterfaces = (deviceId: string, portCount: number) =>
         name: `port${index + 1}`,
         ip_address: null,
         subnet_mask: null,
+        mac_address: nextMacAddress(),
         metadata_json: {
             role: 'switchport',
             access_vlan: 1,
@@ -328,6 +351,7 @@ const resizeSwitchInterfaces = (
             name: `port${index + 1}`,
             ip_address: null,
             subnet_mask: null,
+            mac_address: nextMacAddress(),
             metadata_json: {
                 role: 'switchport',
                 access_vlan: 1,
@@ -503,6 +527,7 @@ const createDeviceTemplate = (
                       name: 'eth0',
                       ip_address: null,
                       subnet_mask: null,
+                      mac_address: nextMacAddress(),
                       metadata_json: {},
                   },
               ]
@@ -513,6 +538,7 @@ const createDeviceTemplate = (
                         name: 'pon0',
                         ip_address: null,
                         subnet_mask: null,
+                        mac_address: nextMacAddress(),
                         metadata_json: {
                             role: 'switchport',
                             access_vlan: 1,
@@ -523,6 +549,7 @@ const createDeviceTemplate = (
                         name: 'lan1',
                         ip_address: null,
                         subnet_mask: null,
+                        mac_address: nextMacAddress(),
                         metadata_json: {
                             role: 'switchport',
                             access_vlan: 1,
@@ -536,6 +563,7 @@ const createDeviceTemplate = (
                         name: 'uplink0',
                         ip_address: null,
                         subnet_mask: null,
+                        mac_address: nextMacAddress(),
                         metadata_json: {
                             role: 'switchport',
                             access_vlan: 1,
@@ -550,6 +578,7 @@ const createDeviceTemplate = (
                         name: 'lan0',
                         ip_address: null,
                         subnet_mask: null,
+                        mac_address: nextMacAddress(),
                         metadata_json: {},
                     },
                     {
@@ -557,6 +586,7 @@ const createDeviceTemplate = (
                         name: 'wan0',
                         ip_address: null,
                         subnet_mask: null,
+                        mac_address: nextMacAddress(),
                         metadata_json: {},
                     },
                 ];
@@ -662,6 +692,7 @@ export default function NetworkEditor() {
     const [pingDestinationType, setPingDestinationType] = useState<'device' | 'cloud'>('device');
     const [pingDestinationId, setPingDestinationId] = useState<number | null>(null);
     const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
+    const [arpTable, setArpTable] = useState<ArpTableEntry[]>([]);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
     const [selectedEditorTab, setSelectedEditorTab] = useState<EditorTab>('basic');
@@ -791,6 +822,7 @@ export default function NetworkEditor() {
         setProject(loadedProject);
         setProjectId(loadedProject.id ?? null);
         setSelectedSavedProjectId(loadedProject.id ?? null);
+        setArpTable([]);
         setSelectedNodeId(
             loadedProject.devices[0]?.client_id ??
                 loadedProject.network_clouds[0]?.client_id ??
@@ -1250,6 +1282,7 @@ export default function NetworkEditor() {
             const data = await response.json();
 
             setSimulationResult(data);
+            setArpTable(data.arp_table ?? []);
             setStatusMessage(
                 data.success
                     ? `${data.destination} への Ping に成功しました`
@@ -1276,6 +1309,50 @@ export default function NetworkEditor() {
         setPendingLinkInterfaceId(null);
         setPendingLinkTargetNodeId(null);
         setPendingLinkTargetInterfaceId(null);
+    };
+
+    const removeSelectedInterface = () => {
+        if (
+            !selectedDevice ||
+            !selectedInterface ||
+            selectedDevice.type !== 'pc' ||
+            selectedDevice.interfaces.length <= 1
+        ) {
+            return;
+        }
+
+        const interfaceClientId = selectedInterface.client_id;
+        const remainingInterfaces = selectedDevice.interfaces.filter(
+            (iface) => iface.client_id !== interfaceClientId,
+        );
+
+        setProject((currentProject) => ({
+            ...currentProject,
+            devices: currentProject.devices.map((device) =>
+                device.client_id === selectedDevice.client_id
+                    ? {
+                          ...device,
+                          interfaces: device.interfaces.filter(
+                              (iface) => iface.client_id !== interfaceClientId,
+                          ),
+                      }
+                    : device,
+            ),
+            links: currentProject.links.filter(
+                (link) =>
+                    link.interface_a_client_id !== interfaceClientId &&
+                    link.interface_b_client_id !== interfaceClientId,
+            ),
+        }));
+        setSelectedInterfaceId(remainingInterfaces[0]?.client_id ?? null);
+
+        if (pendingLinkInterfaceId === interfaceClientId) {
+            resetLinkMode();
+        }
+
+        setSimulationResult(null);
+        setArpTable([]);
+        setStatusMessage(`${selectedInterface.name} を削除しました`);
     };
 
     const removeNode = (nodeId: string) => {
@@ -1306,6 +1383,7 @@ export default function NetworkEditor() {
             setContextMenu(null);
             resetLinkMode();
             setSimulationResult(null);
+            setArpTable([]);
             setStatusMessage(`${deviceToRemove.name} を削除しました`);
             return;
         }
@@ -1326,6 +1404,7 @@ export default function NetworkEditor() {
             setContextMenu(null);
             resetLinkMode();
             setSimulationResult(null);
+            setArpTable([]);
             setStatusMessage(`${cloudToRemove.name} を削除しました`);
         }
     };
@@ -1560,6 +1639,7 @@ export default function NetworkEditor() {
                                 setPingSourceDeviceId(null);
                                 setPingDestinationId(null);
                                 setSimulationResult(null);
+                                setArpTable([]);
                                 resetLinkMode();
                                 setSelectedSavedProjectId(savedProjects[0]?.id ?? null);
                                 setStatusMessage('サンプルトポロジーに戻しました');
@@ -1643,6 +1723,8 @@ export default function NetworkEditor() {
                             onRunPingSimulation={runPingSimulation}
                         />
 
+                        <ArpTablePanel arpTable={arpTable} />
+
                     </aside>
                 </section>
 
@@ -1672,13 +1754,14 @@ export default function NetworkEditor() {
                                           ...device,
                                           interfaces: [
                                               ...device.interfaces,
-                                              {
-                                                  client_id: nextClientId(`${device.client_id}-iface`),
-                                                  name: `if${device.interfaces.length}`,
-                                                  ip_address: null,
-                                                  subnet_mask: null,
-                                                  metadata_json: {},
-                                              },
+                                                  {
+                                                      client_id: nextClientId(`${device.client_id}-iface`),
+                                                      name: `if${device.interfaces.length}`,
+                                                      ip_address: null,
+                                                      subnet_mask: null,
+                                                      mac_address: nextMacAddress(),
+                                                      metadata_json: {},
+                                                  },
                                           ],
                                       },
                             );
@@ -2019,29 +2102,43 @@ export default function NetworkEditor() {
                                             <div className="detail-section">
                                                 <div className="detail-heading-row">
                                                     <span className="detail-heading">インターフェース</span>
-                                                    {!isSwitch(selectedDevice) && (
-                                                        <button
-                                                            type="button"
-                                                            className="mini-button"
-                                                            onClick={() =>
-                                                                updateSelectedDevice((device) => ({
-                                                                    ...device,
-                                                                    interfaces: [
-                                                                        ...device.interfaces,
-                                                                        {
-                                                                            client_id: nextClientId(`${device.client_id}-iface`),
-                                                                            name: `if${device.interfaces.length}`,
-                                                                            ip_address: null,
-                                                                            subnet_mask: null,
-                                                                            metadata_json: {},
-                                                                        },
-                                                                    ],
-                                                                }))
-                                                            }
-                                                        >
-                                                            追加
-                                                        </button>
-                                                    )}
+                                                    <div className="inline-link-row">
+                                                        {!isSwitch(selectedDevice) && (
+                                                            <button
+                                                                type="button"
+                                                                className="mini-button"
+                                                                onClick={() =>
+                                                                    updateSelectedDevice((device) => ({
+                                                                        ...device,
+                                                                        interfaces: [
+                                                                            ...device.interfaces,
+                                                                            {
+                                                                                client_id: nextClientId(`${device.client_id}-iface`),
+                                                                                name: `if${device.interfaces.length}`,
+                                                                                ip_address: null,
+                                                                                subnet_mask: null,
+                                                                                mac_address: nextMacAddress(),
+                                                                                metadata_json: {},
+                                                                            },
+                                                                        ],
+                                                                    }))
+                                                                }
+                                                            >
+                                                                追加
+                                                            </button>
+                                                        )}
+                                                        {selectedDevice.type === 'pc' &&
+                                                            selectedDevice.interfaces.length > 1 &&
+                                                            selectedInterface && (
+                                                                <button
+                                                                    type="button"
+                                                                    className="mini-button"
+                                                                    onClick={removeSelectedInterface}
+                                                                >
+                                                                    これを削除
+                                                                </button>
+                                                            )}
+                                                    </div>
                                                 </div>
                                                 <div className="interface-list">
                                                     {selectedDevice.interfaces.map((iface) => {
@@ -2059,12 +2156,18 @@ export default function NetworkEditor() {
                                                                   )
                                                                   ? '接続中'
                                                                   : '未使用';
+                                                        const statusClass =
+                                                            interfaceRole === 'svi'
+                                                                ? 'is-logical'
+                                                                : linkStatus === '接続中'
+                                                                  ? 'is-connected'
+                                                                  : 'is-unused';
 
                                                         return (
                                                             <button
                                                                 key={iface.client_id}
                                                                 type="button"
-                                                                className={`interface-list-item ${selectedInterface?.client_id === iface.client_id ? 'is-active' : ''}`}
+                                                                className={`interface-list-item ${statusClass} ${selectedInterface?.client_id === iface.client_id ? 'is-active' : ''}`}
                                                                 onClick={() => setSelectedInterfaceId(iface.client_id)}
                                                             >
                                                                 <strong>{iface.name}</strong>
@@ -2207,6 +2310,49 @@ export default function NetworkEditor() {
                                                                                 }))
                                                                             }
                                                                         />
+                                                                    </label>
+                                                                    <label className="field-group">
+                                                                        <span>MAC アドレス</span>
+                                                                        <div className="inline-link-row">
+                                                                            <input
+                                                                                className="editor-input"
+                                                                                value={iface.mac_address ?? ''}
+                                                                                onChange={(event) =>
+                                                                                    updateSelectedDevice((device) => ({
+                                                                                        ...device,
+                                                                                        interfaces: device.interfaces.map(
+                                                                                            (deviceInterface, interfaceIndex) =>
+                                                                                                interfaceIndex === index
+                                                                                                    ? {
+                                                                                                          ...deviceInterface,
+                                                                                                          mac_address: event.target.value || null,
+                                                                                                      }
+                                                                                                    : deviceInterface,
+                                                                                        ),
+                                                                                    }))
+                                                                                }
+                                                                            />
+                                                                            <button
+                                                                                type="button"
+                                                                                className="mini-button"
+                                                                                onClick={() =>
+                                                                                    updateSelectedDevice((device) => ({
+                                                                                        ...device,
+                                                                                        interfaces: device.interfaces.map(
+                                                                                            (deviceInterface, interfaceIndex) =>
+                                                                                                interfaceIndex === index
+                                                                                                    ? {
+                                                                                                          ...deviceInterface,
+                                                                                                          mac_address: nextMacAddress(),
+                                                                                                      }
+                                                                                                    : deviceInterface,
+                                                                                        ),
+                                                                                    }))
+                                                                                }
+                                                                            >
+                                                                                ランダム生成
+                                                                            </button>
+                                                                        </div>
                                                                     </label>
                                                                     {(interfaceRole === 'switchport' || interfaceRole === 'svi') && (
                                                                         <label className="field-group">

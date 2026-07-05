@@ -74,6 +74,7 @@ class NetworkProjectTopologyService
                             'name' => $interface->name,
                             'ip_address' => $interface->ip_address,
                             'subnet_mask' => $interface->subnet_mask,
+                            'mac_address' => $interface->mac_address,
                             'metadata_json' => $interface->metadata_json ?? [],
                         ])->all(),
                     'route_entries' => $device->routeEntries
@@ -159,6 +160,7 @@ class NetworkProjectTopologyService
                     'name' => $interfacePayload['name'],
                     'ip_address' => $interfacePayload['ip_address'] ?? null,
                     'subnet_mask' => $interfacePayload['subnet_mask'] ?? null,
+                    'mac_address' => $this->normalizeMacAddress($interfacePayload['mac_address'] ?? null),
                     'metadata_json' => $this->normalizeInterfaceMetadata(
                         $normalizedType,
                         $interfacePayload['metadata_json'] ?? [],
@@ -339,5 +341,21 @@ class NetworkProjectTopologyService
     private function linkClientId(int $id): string
     {
         return "link-{$id}";
+    }
+
+    private function normalizeMacAddress(?string $macAddress): ?string
+    {
+        if ($macAddress !== null) {
+            return strtoupper($macAddress);
+        }
+
+        return sprintf(
+            '02:%02X:%02X:%02X:%02X:%02X',
+            random_int(0, 255),
+            random_int(0, 255),
+            random_int(0, 255),
+            random_int(0, 255),
+            random_int(0, 255),
+        );
     }
 }
