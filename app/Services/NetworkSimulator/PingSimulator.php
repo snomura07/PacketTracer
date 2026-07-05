@@ -459,38 +459,74 @@ class PingSimulator
             return true;
         }
 
+        $interfacesById = $project->devices
+            ->flatMap(fn (Device $device) => $device->interfaces)
+            ->keyBy('id');
+        $sourceCandidates = $this->expandLayer2Candidates(
+            $project,
+            $interfacesById->get($sourceInterfaceId),
+        );
+        $targetCandidates = $this->expandLayer2Candidates(
+            $project,
+            $interfacesById->get($targetInterfaceId),
+        );
+
+        if ($sourceCandidates === [] || $targetCandidates === []) {
+            return false;
+        }
+
         $graph = [];
 
         foreach ($project->links as $link) {
-            if ($link->interface_b_id !== null) {
+            if (
+                $link->interface_b_id !== null &&
+                $this->isPhysicalLayer2Interface($interfacesById->get($link->interface_a_id)) &&
+                $this->isPhysicalLayer2Interface($interfacesById->get($link->interface_b_id))
+            ) {
                 $graph[$link->interface_a_id][] = $link->interface_b_id;
                 $graph[$link->interface_b_id][] = $link->interface_a_id;
             }
         }
 
-        foreach ($project->devices->where('type', Device::TYPE_SWITCH) as $switch) {
-            $interfaces = $switch->interfaces->pluck('id')->all();
-            foreach ($interfaces as $idA) {
-                foreach ($interfaces as $idB) {
-                    if ($idA !== $idB) {
-                        $graph[$idA][] = $idB;
+        foreach ($project->devices as $switch) {
+            $bridgeGroups = [];
+
+            foreach ($switch->interfaces as $interface) {
+                if (!$this->isSwitchport($switch, $interface)) {
+                    continue;
+                }
+
+                $bridgeGroups[$this->accessVlanId($interface)][] = $interface->id;
+            }
+
+            foreach ($bridgeGroups as $interfaceIds) {
+                foreach ($interfaceIds as $idA) {
+                    foreach ($interfaceIds as $idB) {
+                        if ($idA !== $idB) {
+                            $graph[$idA][] = $idB;
+                        }
                     }
                 }
             }
         }
 
-        $queue = [$sourceInterfaceId];
-        $visited = [$sourceInterfaceId => true];
+        $targetLookup = array_fill_keys($targetCandidates, true);
+        $queue = $sourceCandidates;
+        $visited = array_fill_keys($sourceCandidates, true);
 
         while ($queue !== []) {
             $current = array_shift($queue);
+
+            if (isset($targetLookup[$current])) {
+                return true;
+            }
 
             foreach ($graph[$current] ?? [] as $neighbor) {
                 if (isset($visited[$neighbor])) {
                     continue;
                 }
 
-                if ($neighbor === $targetInterfaceId) {
+                if (isset($targetLookup[$neighbor])) {
                     return true;
                 }
 
@@ -500,6 +536,68 @@ class PingSimulator
         }
 
         return false;
+    }
+
+    private function expandLayer2Candidates(NetworkProject $project, mixed $interface): array
+    {
+        if (!$interface instanceof DeviceInterface) {
+            return [];
+        }
+
+        $device = $project->devices->firstWhere('id', $interface->device_id);
+        if (!$device instanceof Device) {
+            return [];
+        }
+
+        if ($this->isSvi($device, $interface)) {
+            $vlanId = $this->sviVlanId($interface);
+
+            return $device->interfaces
+                ->filter(
+                    fn (DeviceInterface $candidate) =>
+                        $this->isSwitchport($device, $candidate) &&
+                        $this->accessVlanId($candidate) === $vlanId,
+                )
+                ->pluck('id')
+                ->all();
+        }
+
+        if (!$this->isPhysicalLayer2Interface($interface)) {
+            return [];
+        }
+
+        return [$interface->id];
+    }
+
+    private function isPhysicalLayer2Interface(mixed $interface): bool
+    {
+        return $interface instanceof DeviceInterface && ($interface->metadata_json['role'] ?? null) !== 'svi';
+    }
+
+    private function isSwitchport(Device $device, DeviceInterface $interface): bool
+    {
+        if ($device->effectiveType() === Device::TYPE_L2_SWITCH) {
+            return true;
+        }
+
+        return $device->effectiveType() === Device::TYPE_L3_SWITCH &&
+            ($interface->metadata_json['role'] ?? 'switchport') === 'switchport';
+    }
+
+    private function isSvi(Device $device, DeviceInterface $interface): bool
+    {
+        return $device->effectiveType() === Device::TYPE_L3_SWITCH &&
+            ($interface->metadata_json['role'] ?? null) === 'svi';
+    }
+
+    private function accessVlanId(DeviceInterface $interface): int
+    {
+        return (int) ($interface->metadata_json['access_vlan'] ?? 1);
+    }
+
+    private function sviVlanId(DeviceInterface $interface): int
+    {
+        return (int) ($interface->metadata_json['vlan_id'] ?? 1);
     }
 
     private function findInterfaceByIp(Collection $devices, string $ipAddress): ?DeviceInterface

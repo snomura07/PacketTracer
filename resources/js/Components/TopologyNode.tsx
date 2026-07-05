@@ -4,7 +4,17 @@ type TopologyNodeData = {
     title: string;
     category: string;
     details: string[];
-    kind: 'pc' | 'switch' | 'router' | 'firewall' | 'internet' | 'masters_one' | 'wan';
+    kind:
+        | 'pc'
+        | 'l2_switch'
+        | 'l3_switch'
+        | 'onu'
+        | 'ap'
+        | 'router'
+        | 'firewall'
+        | 'internet'
+        | 'masters_one'
+        | 'wan';
     onSelect?: () => void;
     onContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
 };
@@ -19,13 +29,29 @@ const iconForKind = (kind: TopologyNodeData['kind']) => {
                     <path d="M24 48h16l4 6H20z" />
                 </svg>
             );
-        case 'switch':
+        case 'l2_switch':
+        case 'l3_switch':
             return (
                 <svg viewBox="0 0 64 64" aria-hidden="true">
                     <rect x="8" y="18" width="48" height="28" rx="6" />
                     <path d="M18 28h8M30 28h16M18 36h12M34 36h12" className="node-icon-screen" />
                     <circle cx="18" cy="28" r="2" className="node-icon-screen" />
                     <circle cx="18" cy="36" r="2" className="node-icon-screen" />
+                </svg>
+            );
+        case 'onu':
+            return (
+                <svg viewBox="0 0 64 64" aria-hidden="true">
+                    <rect x="12" y="18" width="40" height="28" rx="6" />
+                    <path d="M20 28h24M20 36h10M34 36h10" className="node-icon-screen" />
+                    <circle cx="18" cy="32" r="3" className="node-icon-screen" />
+                </svg>
+            );
+        case 'ap':
+            return (
+                <svg viewBox="0 0 64 64" aria-hidden="true">
+                    <circle cx="32" cy="42" r="5" />
+                    <path d="M22 34a14 14 0 0 1 20 0M16 28a22 22 0 0 1 32 0M10 22a30 30 0 0 1 44 0" className="node-icon-screen" />
                 </svg>
             );
         case 'router':

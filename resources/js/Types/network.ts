@@ -1,4 +1,5 @@
-export type DeviceType = 'pc' | 'switch' | 'router' | 'firewall';
+export type DeviceType =
+    'pc' | 'l2_switch' | 'l3_switch' | 'onu' | 'ap' | 'router' | 'firewall';
 
 export type NetworkCloudType = 'internet' | 'masters_one' | 'wan';
 
@@ -7,6 +8,7 @@ export type TopologyInterface = {
     name: string;
     ip_address: string | null;
     subnet_mask: string | null;
+    metadata_json: Record<string, unknown>;
 };
 
 export type RouteEntry = {
@@ -57,6 +59,16 @@ export type TopologyProject = {
     devices: TopologyDevice[];
     network_clouds: TopologyCloud[];
     links: TopologyLink[];
+};
+
+export type SavedProjectSummary = {
+    id: number;
+    name: string;
+    description: string | null;
+    devices_count: number;
+    network_clouds_count: number;
+    links_count: number;
+    updated_at: string | null;
 };
 
 export type SimulationHop = {

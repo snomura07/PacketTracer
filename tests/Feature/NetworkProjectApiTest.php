@@ -72,6 +72,73 @@ class NetworkProjectApiTest extends TestCase
         $this->assertDatabaseCount('links', 3);
     }
 
+    public function test_it_lists_saved_projects_for_later_loading(): void
+    {
+        $this->postJson('/api/network-projects', $this->samplePayload());
+
+        $secondPayload = $this->samplePayload();
+        $secondPayload['name'] = 'Branch WAN';
+        $secondPayload['description'] = 'Another saved topology';
+
+        $this->postJson('/api/network-projects', $secondPayload);
+
+        $this->getJson('/api/network-projects')
+            ->assertOk()
+            ->assertJsonCount(2, 'projects')
+            ->assertJsonPath('projects.0.name', 'Branch WAN')
+            ->assertJsonPath('projects.0.devices_count', 2)
+            ->assertJsonPath('projects.0.network_clouds_count', 1)
+            ->assertJsonPath('projects.0.links_count', 2)
+            ->assertJsonPath('projects.1.name', 'HQ Internet Access');
+    }
+
+    public function test_it_normalizes_legacy_switch_types_into_l2_and_l3_switches(): void
+    {
+        $payload = $this->samplePayload();
+        $payload['devices'][1]['type'] = 'switch';
+        $payload['devices'][1]['metadata_json'] = ['switch_mode' => 'l3'];
+
+        $this->postJson('/api/network-projects', $payload)
+            ->assertCreated()
+            ->assertJsonPath('project.devices.1.type', 'l3_switch')
+            ->assertJsonPath('project.devices.1.metadata_json.switch_mode', 'l3');
+    }
+
+    public function test_it_persists_ap_ssid_profiles(): void
+    {
+        $payload = $this->samplePayload();
+        $payload['devices'][] = [
+            'client_id' => 'device-ap-1',
+            'name' => 'AP-1',
+            'type' => 'ap',
+            'position_x' => 520,
+            'position_y' => 120,
+            'default_gateway' => null,
+            'metadata_json' => [
+                'ssid_profiles' => [
+                    ['name' => 'CorpWiFi', 'vlan_id' => 10, 'security' => 'wpa2_psk'],
+                    ['name' => 'GuestWiFi', 'vlan_id' => 20, 'security' => 'open'],
+                ],
+            ],
+            'interfaces' => [
+                [
+                    'client_id' => 'ap-uplink0',
+                    'name' => 'uplink0',
+                    'ip_address' => null,
+                    'subnet_mask' => null,
+                    'metadata_json' => ['role' => 'switchport', 'access_vlan' => 10],
+                ],
+            ],
+            'route_entries' => [],
+        ];
+
+        $this->postJson('/api/network-projects', $payload)
+            ->assertCreated()
+            ->assertJsonPath('project.devices.2.type', 'ap')
+            ->assertJsonPath('project.devices.2.metadata_json.ssid_profiles.0.name', 'CorpWiFi')
+            ->assertJsonPath('project.devices.2.metadata_json.ssid_profiles.1.vlan_id', 20);
+    }
+
     private function samplePayload(): array
     {
         return [
@@ -92,6 +159,7 @@ class NetworkProjectApiTest extends TestCase
                             'name' => 'eth0',
                             'ip_address' => '192.168.10.10',
                             'subnet_mask' => '255.255.255.0',
+                            'metadata_json' => [],
                         ],
                     ],
                     'route_entries' => [],
@@ -110,12 +178,14 @@ class NetworkProjectApiTest extends TestCase
                             'name' => 'lan0',
                             'ip_address' => '192.168.10.1',
                             'subnet_mask' => '255.255.255.0',
+                            'metadata_json' => [],
                         ],
                         [
                             'client_id' => 'router-wan0',
                             'name' => 'wan0',
                             'ip_address' => '203.0.113.2',
                             'subnet_mask' => '255.255.255.252',
+                            'metadata_json' => [],
                         ],
                     ],
                     'route_entries' => [

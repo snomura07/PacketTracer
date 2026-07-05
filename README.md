@@ -64,3 +64,9 @@ docker compose up --build app vite
 - `php artisan migrate`
 
 詳細は [docs/local-development.md](docs/local-development.md) を参照してください。
+
+設計メモ:
+
+- [docs/architecture.md](docs/architecture.md)
+- [docs/domain-model.md](docs/domain-model.md)
+- [docs/network-devices.md](docs/network-devices.md)

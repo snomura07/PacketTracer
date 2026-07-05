@@ -31,20 +31,21 @@ class PingSimulationTest extends TestCase
                         'name' => 'eth0',
                         'ip_address' => '192.168.10.10',
                         'subnet_mask' => '255.255.255.0',
+                        'metadata_json' => [],
                     ]],
                     'route_entries' => [],
                 ],
                 [
                     'client_id' => 'sw-1',
                     'name' => 'SW-1',
-                    'type' => Device::TYPE_SWITCH,
+                    'type' => Device::TYPE_L2_SWITCH,
                     'position_x' => 0,
                     'position_y' => 0,
                     'default_gateway' => null,
                     'metadata_json' => [],
                     'interfaces' => [
-                        ['client_id' => 'sw-1-port1', 'name' => 'port1', 'ip_address' => null, 'subnet_mask' => null],
-                        ['client_id' => 'sw-1-port2', 'name' => 'port2', 'ip_address' => null, 'subnet_mask' => null],
+                        ['client_id' => 'sw-1-port1', 'name' => 'port1', 'ip_address' => null, 'subnet_mask' => null, 'metadata_json' => ['access_vlan' => 10]],
+                        ['client_id' => 'sw-1-port2', 'name' => 'port2', 'ip_address' => null, 'subnet_mask' => null, 'metadata_json' => ['access_vlan' => 10]],
                     ],
                     'route_entries' => [],
                 ],
@@ -57,22 +58,22 @@ class PingSimulationTest extends TestCase
                     'default_gateway' => null,
                     'metadata_json' => [],
                     'interfaces' => [
-                        ['client_id' => 'router-lan0', 'name' => 'lan0', 'ip_address' => '192.168.10.1', 'subnet_mask' => '255.255.255.0'],
-                        ['client_id' => 'router-lan1', 'name' => 'lan1', 'ip_address' => '192.168.20.1', 'subnet_mask' => '255.255.255.0'],
+                        ['client_id' => 'router-lan0', 'name' => 'lan0', 'ip_address' => '192.168.10.1', 'subnet_mask' => '255.255.255.0', 'metadata_json' => []],
+                        ['client_id' => 'router-lan1', 'name' => 'lan1', 'ip_address' => '192.168.20.1', 'subnet_mask' => '255.255.255.0', 'metadata_json' => []],
                     ],
                     'route_entries' => [],
                 ],
                 [
                     'client_id' => 'sw-2',
                     'name' => 'SW-2',
-                    'type' => Device::TYPE_SWITCH,
+                    'type' => Device::TYPE_L2_SWITCH,
                     'position_x' => 0,
                     'position_y' => 0,
                     'default_gateway' => null,
                     'metadata_json' => [],
                     'interfaces' => [
-                        ['client_id' => 'sw-2-port1', 'name' => 'port1', 'ip_address' => null, 'subnet_mask' => null],
-                        ['client_id' => 'sw-2-port2', 'name' => 'port2', 'ip_address' => null, 'subnet_mask' => null],
+                        ['client_id' => 'sw-2-port1', 'name' => 'port1', 'ip_address' => null, 'subnet_mask' => null, 'metadata_json' => ['access_vlan' => 20]],
+                        ['client_id' => 'sw-2-port2', 'name' => 'port2', 'ip_address' => null, 'subnet_mask' => null, 'metadata_json' => ['access_vlan' => 20]],
                     ],
                     'route_entries' => [],
                 ],
@@ -84,12 +85,13 @@ class PingSimulationTest extends TestCase
                     'position_y' => 0,
                     'default_gateway' => '192.168.20.1',
                     'metadata_json' => [],
-                    'interfaces' => [[
-                        'client_id' => 'pc-b-eth0',
-                        'name' => 'eth0',
-                        'ip_address' => '192.168.20.10',
-                        'subnet_mask' => '255.255.255.0',
-                    ]],
+                        'interfaces' => [[
+                            'client_id' => 'pc-b-eth0',
+                            'name' => 'eth0',
+                            'ip_address' => '192.168.20.10',
+                            'subnet_mask' => '255.255.255.0',
+                            'metadata_json' => [],
+                        ]],
                     'route_entries' => [],
                 ],
             ],
@@ -128,12 +130,13 @@ class PingSimulationTest extends TestCase
                     'position_y' => 0,
                     'default_gateway' => null,
                     'metadata_json' => [],
-                    'interfaces' => [[
-                        'client_id' => 'pc-a-eth0',
-                        'name' => 'eth0',
-                        'ip_address' => '192.168.10.10',
-                        'subnet_mask' => '255.255.255.0',
-                    ]],
+                        'interfaces' => [[
+                            'client_id' => 'pc-a-eth0',
+                            'name' => 'eth0',
+                            'ip_address' => '192.168.10.10',
+                            'subnet_mask' => '255.255.255.0',
+                            'metadata_json' => [],
+                        ]],
                     'route_entries' => [],
                 ],
                 [
@@ -144,12 +147,13 @@ class PingSimulationTest extends TestCase
                     'position_y' => 0,
                     'default_gateway' => null,
                     'metadata_json' => [],
-                    'interfaces' => [[
-                        'client_id' => 'pc-b-eth0',
-                        'name' => 'eth0',
-                        'ip_address' => '192.168.20.10',
-                        'subnet_mask' => '255.255.255.0',
-                    ]],
+                        'interfaces' => [[
+                            'client_id' => 'pc-b-eth0',
+                            'name' => 'eth0',
+                            'ip_address' => '192.168.20.10',
+                            'subnet_mask' => '255.255.255.0',
+                            'metadata_json' => [],
+                        ]],
                     'route_entries' => [],
                 ],
             ],
@@ -167,6 +171,82 @@ class PingSimulationTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('success', false)
             ->assertJsonPath('error_code', 'DEFAULT_GATEWAY_MISSING');
+    }
+
+    public function test_it_routes_between_subnets_through_an_l3_switch_svis(): void
+    {
+        $project = app(NetworkProjectTopologyService::class)->create([
+            'name' => 'PC to PC through L3 switch',
+            'description' => null,
+            'devices' => [
+                [
+                    'client_id' => 'pc-a',
+                    'name' => 'PC-A',
+                    'type' => Device::TYPE_PC,
+                    'position_x' => 0,
+                    'position_y' => 0,
+                    'default_gateway' => '192.168.10.1',
+                    'metadata_json' => [],
+                    'interfaces' => [[
+                        'client_id' => 'pc-a-eth0',
+                        'name' => 'eth0',
+                        'ip_address' => '192.168.10.10',
+                        'subnet_mask' => '255.255.255.0',
+                        'metadata_json' => [],
+                    ]],
+                    'route_entries' => [],
+                ],
+                [
+                    'client_id' => 'sw-core',
+                    'name' => 'Core-SW',
+                    'type' => Device::TYPE_L3_SWITCH,
+                    'position_x' => 0,
+                    'position_y' => 0,
+                    'default_gateway' => null,
+                    'metadata_json' => ['switch_mode' => 'l3'],
+                    'interfaces' => [
+                        ['client_id' => 'sw-core-port1', 'name' => 'port1', 'ip_address' => null, 'subnet_mask' => null, 'metadata_json' => ['role' => 'switchport', 'access_vlan' => 10]],
+                        ['client_id' => 'sw-core-port2', 'name' => 'port2', 'ip_address' => null, 'subnet_mask' => null, 'metadata_json' => ['role' => 'switchport', 'access_vlan' => 20]],
+                        ['client_id' => 'sw-core-vlan10', 'name' => 'vlan10', 'ip_address' => '192.168.10.1', 'subnet_mask' => '255.255.255.0', 'metadata_json' => ['role' => 'svi', 'vlan_id' => 10]],
+                        ['client_id' => 'sw-core-vlan20', 'name' => 'vlan20', 'ip_address' => '192.168.20.1', 'subnet_mask' => '255.255.255.0', 'metadata_json' => ['role' => 'svi', 'vlan_id' => 20]],
+                    ],
+                    'route_entries' => [],
+                ],
+                [
+                    'client_id' => 'pc-b',
+                    'name' => 'PC-B',
+                    'type' => Device::TYPE_PC,
+                    'position_x' => 0,
+                    'position_y' => 0,
+                    'default_gateway' => '192.168.20.1',
+                    'metadata_json' => [],
+                    'interfaces' => [[
+                        'client_id' => 'pc-b-eth0',
+                        'name' => 'eth0',
+                        'ip_address' => '192.168.20.10',
+                        'subnet_mask' => '255.255.255.0',
+                        'metadata_json' => [],
+                    ]],
+                    'route_entries' => [],
+                ],
+            ],
+            'network_clouds' => [],
+            'links' => [
+                ['interface_a_client_id' => 'pc-a-eth0', 'interface_b_client_id' => 'sw-core-port1', 'network_cloud_client_id' => null],
+                ['interface_a_client_id' => 'sw-core-port2', 'interface_b_client_id' => 'pc-b-eth0', 'network_cloud_client_id' => null],
+            ],
+        ]);
+
+        $source = $project->devices->firstWhere('name', 'PC-A');
+        $destination = $project->devices->firstWhere('name', 'PC-B');
+
+        $this->postJson("/api/network-projects/{$project->id}/simulate/ping", [
+            'source_device_id' => $source->id,
+            'destination_type' => 'device',
+            'destination_id' => $destination->id,
+        ])->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('destination', 'PC-B');
     }
 
     public function test_it_reaches_internet_cloud_with_default_route(): void

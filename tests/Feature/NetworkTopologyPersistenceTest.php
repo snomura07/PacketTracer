@@ -49,18 +49,21 @@ class NetworkTopologyPersistenceTest extends TestCase
             'name' => 'eth0',
             'ip_address' => '192.168.10.10',
             'subnet_mask' => '255.255.255.0',
+            'metadata_json' => [],
         ]);
 
         $routerLan = $router->interfaces()->create([
             'name' => 'lan0',
             'ip_address' => '192.168.10.1',
             'subnet_mask' => '255.255.255.0',
+            'metadata_json' => [],
         ]);
 
         $routerWan = $router->interfaces()->create([
             'name' => 'wan0',
             'ip_address' => '203.0.113.2',
             'subnet_mask' => '255.255.255.252',
+            'metadata_json' => [],
         ]);
 
         $project->links()->create([

@@ -49,7 +49,10 @@ Device
 
 ```text
 pc
-switch
+l2_switch
+l3_switch
+onu
+ap
 router
 firewall
 ```
@@ -58,7 +61,15 @@ firewall
 
 PCのデフォルトゲートウェイはDeviceに持たせる。
 
-RouterとFirewallのデフォルトルートはRouteEntryとして持たせる。
+L2 SwitchはVLAN内のL2転送を担う機器として扱い、L3ルーティング情報は持たせない。
+
+L3 Switchは複数インターフェースにIPを持てるL3機器として扱い、RouteEntryを持てる。
+
+ONUは光アクセス回線の終端装置として扱い、初期段階ではL2受け渡しのみを担う。
+
+APは無線クライアントを有線LANへ収容するアクセスポイントとして扱い、初期段階ではL2ブリッジのみを担う。
+
+RouterとFirewallとL3 SwitchのデフォルトルートはRouteEntryとして持たせる。
 
 Firewallは初期実装ではRouterに近いL3機器として扱うが、将来のポリシー制御拡張を考慮してDevice typeを分ける。
 
