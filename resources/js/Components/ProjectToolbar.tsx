@@ -4,8 +4,17 @@ type ProjectToolbarProps = {
     selectedLabel: string;
     statusTone: 'error' | 'success' | 'info';
     statusMessage: string;
+    savedProjects: {
+        id: number;
+        name: string;
+    }[];
+    selectedSavedProjectId: number | null;
     isSaving: boolean;
+    isProjectListLoading: boolean;
+    isOpeningProject: boolean;
     isReloading: boolean;
+    onSelectSavedProject: (projectId: number | null) => void;
+    onOpenSelectedProject: () => void;
     onSave: () => void;
     onReload: () => void;
     onReset: () => void;
@@ -17,8 +26,14 @@ export default function ProjectToolbar({
     selectedLabel,
     statusTone,
     statusMessage,
+    savedProjects,
+    selectedSavedProjectId,
     isSaving,
+    isProjectListLoading,
+    isOpeningProject,
     isReloading,
+    onSelectSavedProject,
+    onOpenSelectedProject,
     onSave,
     onReload,
     onReset,
@@ -37,6 +52,45 @@ export default function ProjectToolbar({
                 </p>
             </div>
             <div className="canvas-toolbar-actions">
+                <div className="project-picker">
+                    <select
+                        className="project-select"
+                        value={selectedSavedProjectId ?? ''}
+                        onChange={(event) =>
+                            onSelectSavedProject(
+                                event.target.value === ''
+                                    ? null
+                                    : Number(event.target.value),
+                            )
+                        }
+                        disabled={isProjectListLoading || savedProjects.length === 0}
+                    >
+                        <option value="">
+                            {isProjectListLoading
+                                ? '保存済みプロジェクトを読込中...'
+                                : savedProjects.length === 0
+                                  ? '保存済みプロジェクトなし'
+                                  : '保存済みプロジェクトを選択'}
+                        </option>
+                        {savedProjects.map((savedProject) => (
+                            <option key={savedProject.id} value={savedProject.id}>
+                                #{savedProject.id} {savedProject.name}
+                            </option>
+                        ))}
+                    </select>
+                    <button
+                        type="button"
+                        className="action-button"
+                        onClick={onOpenSelectedProject}
+                        disabled={
+                            isOpeningProject ||
+                            isProjectListLoading ||
+                            selectedSavedProjectId === null
+                        }
+                    >
+                        {isOpeningProject ? '読込中...' : '開く'}
+                    </button>
+                </div>
                 <button
                     type="button"
                     className="action-button primary"

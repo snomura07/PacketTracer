@@ -17,6 +17,13 @@ class NetworkProjectController extends Controller
     ) {
     }
 
+    public function index(): JsonResponse
+    {
+        return response()->json([
+            'projects' => $this->topologyService->list(),
+        ]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $payload = $this->validatedPayload($request);
@@ -52,7 +59,7 @@ class NetworkProjectController extends Controller
             'devices' => ['required', 'array'],
             'devices.*.client_id' => ['required', 'string', 'max:255'],
             'devices.*.name' => ['required', 'string', 'max:255'],
-            'devices.*.type' => ['required', Rule::in(Device::TYPES)],
+            'devices.*.type' => ['required', Rule::in(Device::INPUT_TYPES)],
             'devices.*.position_x' => ['required', 'integer'],
             'devices.*.position_y' => ['required', 'integer'],
             'devices.*.default_gateway' => ['nullable', 'ip'],
@@ -62,6 +69,7 @@ class NetworkProjectController extends Controller
             'devices.*.interfaces.*.name' => ['required', 'string', 'max:255'],
             'devices.*.interfaces.*.ip_address' => ['nullable', 'ip'],
             'devices.*.interfaces.*.subnet_mask' => ['nullable', 'ip'],
+            'devices.*.interfaces.*.metadata_json' => ['nullable', 'array'],
             'devices.*.route_entries' => ['nullable', 'array'],
             'devices.*.route_entries.*.destination_network' => ['required', 'ip'],
             'devices.*.route_entries.*.subnet_mask' => ['required', 'ip'],

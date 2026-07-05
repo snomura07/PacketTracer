@@ -51,9 +51,30 @@ export default function TopologyContextMenu({
                     <button
                         type="button"
                         className="context-menu-item"
-                        onClick={() => onAddDevice('switch', contextMenu.flowPosition)}
+                        onClick={() => onAddDevice('l2_switch', contextMenu.flowPosition)}
                     >
-                        スイッチを追加
+                        L2 スイッチを追加
+                    </button>
+                    <button
+                        type="button"
+                        className="context-menu-item"
+                        onClick={() => onAddDevice('l3_switch', contextMenu.flowPosition)}
+                    >
+                        L3 スイッチを追加
+                    </button>
+                    <button
+                        type="button"
+                        className="context-menu-item"
+                        onClick={() => onAddDevice('onu', contextMenu.flowPosition)}
+                    >
+                        ONU を追加
+                    </button>
+                    <button
+                        type="button"
+                        className="context-menu-item"
+                        onClick={() => onAddDevice('ap', contextMenu.flowPosition)}
+                    >
+                        AP を追加
                     </button>
                     <button
                         type="button"

@@ -13,7 +13,10 @@ class NetworkEditorController extends Controller
             'milestone' => 'PC-A -> Switch -> Router -> Cloud',
             'supportedDeviceTypes' => [
                 'pc',
-                'switch',
+                'l2_switch',
+                'l3_switch',
+                'onu',
+                'ap',
                 'router',
                 'firewall',
             ],

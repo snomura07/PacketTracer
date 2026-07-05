@@ -12,7 +12,6 @@ import {
     type ReactFlowInstance,
 } from 'reactflow';
 import PingPanel from '../Components/PingPanel';
-import ProjectPanel from '../Components/ProjectPanel';
 import ProjectToolbar from '../Components/ProjectToolbar';
 import TopologyNode from '../Components/TopologyNode';
 import TopologyContextMenu from '../Components/TopologyContextMenu';
@@ -20,6 +19,7 @@ import type {
     DeviceType,
     NetworkCloudType,
     RouteEntry,
+    SavedProjectSummary,
     SimulationResult,
     TopologyCloud,
     TopologyDevice,
@@ -45,9 +45,13 @@ type ContextMenuState = {
     targetNodeId: string | null;
 };
 
+type EditorTab = 'basic' | 'interfaces' | 'routing' | 'links';
+
 const nodeTypes = {
     topologyNode: TopologyNode,
 };
+
+const SWITCH_PORT_COUNT_OPTIONS = [8, 24, 48] as const;
 
 const nextClientId = (prefix: string): string =>
     `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
@@ -70,6 +74,7 @@ const initialProject = (): TopologyProject => ({
                     name: 'eth0',
                     ip_address: '192.168.10.10',
                     subnet_mask: '255.255.255.0',
+                    metadata_json: {},
                 },
             ],
             route_entries: [],
@@ -77,12 +82,13 @@ const initialProject = (): TopologyProject => ({
         {
             client_id: 'device-switch-1',
             name: 'SW-1',
-            type: 'switch',
+            type: 'l2_switch',
             position_x: 240,
             position_y: 160,
             default_gateway: null,
             metadata_json: {
                 switch_mode: 'l2',
+                port_count: 8,
             },
             interfaces: [
                 {
@@ -90,48 +96,56 @@ const initialProject = (): TopologyProject => ({
                     name: 'port1',
                     ip_address: null,
                     subnet_mask: null,
+                    metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
                 {
                     client_id: 'interface-switch-1-port2',
                     name: 'port2',
                     ip_address: null,
                     subnet_mask: null,
+                    metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
                 {
                     client_id: 'interface-switch-1-port3',
                     name: 'port3',
                     ip_address: null,
                     subnet_mask: null,
+                    metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
                 {
                     client_id: 'interface-switch-1-port4',
                     name: 'port4',
                     ip_address: null,
                     subnet_mask: null,
+                    metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
                 {
                     client_id: 'interface-switch-1-port5',
                     name: 'port5',
                     ip_address: null,
                     subnet_mask: null,
+                    metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
                 {
                     client_id: 'interface-switch-1-port6',
                     name: 'port6',
                     ip_address: null,
                     subnet_mask: null,
+                    metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
                 {
                     client_id: 'interface-switch-1-port7',
                     name: 'port7',
                     ip_address: null,
                     subnet_mask: null,
+                    metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
                 {
                     client_id: 'interface-switch-1-port8',
                     name: 'port8',
                     ip_address: null,
                     subnet_mask: null,
+                    metadata_json: { role: 'switchport', access_vlan: 10 },
                 },
             ],
             route_entries: [],
@@ -150,18 +164,21 @@ const initialProject = (): TopologyProject => ({
                     name: 'lan0',
                     ip_address: '192.168.10.1',
                     subnet_mask: '255.255.255.0',
+                    metadata_json: {},
                 },
                 {
                     client_id: 'interface-router-1-wan0',
                     name: 'wan0',
                     ip_address: '203.0.113.2',
                     subnet_mask: '255.255.255.252',
+                    metadata_json: {},
                 },
                 {
                     client_id: 'interface-router-1-wan1',
                     name: 'wan1',
                     ip_address: '10.0.0.1',
                     subnet_mask: '255.255.255.252',
+                    metadata_json: {},
                 },
             ],
             route_entries: [
@@ -236,10 +253,17 @@ const buildDeviceLabel = (device: TopologyDevice): string => {
     const lines = [device.name, device.type.toUpperCase()];
 
     for (const iface of device.interfaces) {
+        const interfaceRole = String(iface.metadata_json?.role ?? '');
+        const roleSuffix =
+            interfaceRole === 'svi'
+                ? ` vlan${String(iface.metadata_json?.vlan_id ?? '1')}`
+                : interfaceRole === 'switchport'
+                  ? ` vlan${String(iface.metadata_json?.access_vlan ?? '1')}`
+                  : '';
         lines.push(
             iface.ip_address && iface.subnet_mask
-                ? `${iface.name} ${iface.ip_address}/${iface.subnet_mask}`
-                : `${iface.name} unnumbered`,
+                ? `${iface.name}${roleSuffix} ${iface.ip_address}/${iface.subnet_mask}`
+                : `${iface.name}${roleSuffix} unnumbered`,
         );
     }
 
@@ -247,18 +271,107 @@ const buildDeviceLabel = (device: TopologyDevice): string => {
         lines.push(`GW ${device.default_gateway}`);
     }
 
+    if (device.type === 'ap') {
+        const ssidProfiles = Array.isArray(device.metadata_json?.ssid_profiles)
+            ? device.metadata_json.ssid_profiles
+            : [];
+
+        for (const profile of ssidProfiles as Array<Record<string, unknown>>) {
+            lines.push(
+                `SSID ${String(profile.name ?? 'SSID')} vlan${String(profile.vlan_id ?? 1)}`,
+            );
+        }
+    }
+
     return lines.join('\n');
 };
 
-const getSwitchMode = (device: TopologyDevice): 'l2' | 'l3' =>
-    device.type === 'switch' && device.metadata_json?.switch_mode === 'l3' ? 'l3' : 'l2';
+const isL2Switch = (device: TopologyDevice): boolean => device.type === 'l2_switch';
+
+const isL3Switch = (device: TopologyDevice): boolean => device.type === 'l3_switch';
+
+const isSwitch = (device: TopologyDevice): boolean => isL2Switch(device) || isL3Switch(device);
+
+const supportsStaticRouting = (device: TopologyDevice): boolean =>
+    isL3Switch(device) || device.type === 'router' || device.type === 'firewall';
+
+const supportsHostDefaultGateway = (device: TopologyDevice): boolean => device.type === 'pc';
+
+const switchPortCount = (device: TopologyDevice): number =>
+    Number(device.metadata_json?.port_count ?? device.interfaces.length ?? 8);
+
+const createSwitchInterfaces = (deviceId: string, portCount: number) =>
+    Array.from({ length: portCount }, (_, index) => ({
+        client_id: nextClientId(`${deviceId}-port${index + 1}`),
+        name: `port${index + 1}`,
+        ip_address: null,
+        subnet_mask: null,
+        metadata_json: {
+            role: 'switchport',
+            access_vlan: 1,
+        },
+    }));
+
+const resizeSwitchInterfaces = (
+    device: TopologyDevice,
+    portCount: number,
+): TopologyDevice => {
+    const nextInterfaces = device.interfaces.slice(0, portCount).map((iface, index) => ({
+        ...iface,
+        name: iface.name || `port${index + 1}`,
+    }));
+
+    while (nextInterfaces.length < portCount) {
+        const index = nextInterfaces.length;
+        nextInterfaces.push({
+            client_id: nextClientId(`${device.client_id}-port${index + 1}`),
+            name: `port${index + 1}`,
+            ip_address: null,
+            subnet_mask: null,
+            metadata_json: {
+                role: 'switchport',
+                access_vlan: 1,
+            },
+        });
+    }
+
+    return {
+        ...device,
+        metadata_json: {
+            ...device.metadata_json,
+            port_count: portCount,
+        },
+        interfaces: nextInterfaces,
+    };
+};
+
+const interfaceRoleForDevice = (
+    device: TopologyDevice,
+    iface: TopologyDevice['interfaces'][number],
+): 'switchport' | 'svi' | 'routed' | 'host' =>
+    device.type === 'l2_switch'
+        ? 'switchport'
+        : device.type === 'l3_switch'
+          ? ((iface.metadata_json?.role as 'switchport' | 'svi' | 'routed' | undefined) ??
+              'switchport')
+          : device.type === 'onu' || device.type === 'ap'
+            ? 'switchport'
+          : device.type === 'pc'
+            ? 'host'
+            : 'routed';
 
 const deviceTypeLabel = (type: DeviceType | NetworkCloudType): string => {
     switch (type) {
         case 'pc':
             return 'PC';
-        case 'switch':
-            return 'スイッチ';
+        case 'l2_switch':
+            return 'L2 スイッチ';
+        case 'l3_switch':
+            return 'L3 スイッチ';
+        case 'onu':
+            return 'ONU';
+        case 'ap':
+            return 'AP';
         case 'router':
             return 'ルータ';
         case 'firewall':
@@ -274,10 +387,22 @@ const deviceTypeLabel = (type: DeviceType | NetworkCloudType): string => {
     }
 };
 
-const buildDeviceCategory = (device: TopologyDevice): string =>
-    device.type === 'switch'
-        ? `${getSwitchMode(device).toUpperCase()} スイッチ`
-        : deviceTypeLabel(device.type);
+const buildDeviceCategory = (device: TopologyDevice): string => deviceTypeLabel(device.type);
+
+const apSsidProfiles = (device: TopologyDevice): Array<{
+    name: string;
+    vlan_id: number;
+    security: string;
+}> =>
+    Array.isArray(device.metadata_json?.ssid_profiles)
+        ? (device.metadata_json.ssid_profiles as Array<Record<string, unknown>>).map(
+              (profile) => ({
+                  name: String(profile.name ?? 'SSID'),
+                  vlan_id: Number(profile.vlan_id ?? 1),
+                  security: String(profile.security ?? 'wpa2_psk'),
+              }),
+          )
+        : [];
 
 const buildCloudLabel = (cloud: TopologyCloud): string => {
     const lines = [cloud.name, cloud.type.toUpperCase()];
@@ -378,27 +503,61 @@ const createDeviceTemplate = (
                       name: 'eth0',
                       ip_address: null,
                       subnet_mask: null,
+                      metadata_json: {},
                   },
               ]
-            : type === 'switch'
-              ? Array.from({ length: 8 }, (_, index) => ({
-                    client_id: nextClientId(`${deviceId}-port${index + 1}`),
-                    name: `port${index + 1}`,
-                    ip_address: null,
-                    subnet_mask: null,
-                }))
+            : type === 'onu'
+              ? [
+                    {
+                        client_id: nextClientId(`${deviceId}-pon0`),
+                        name: 'pon0',
+                        ip_address: null,
+                        subnet_mask: null,
+                        metadata_json: {
+                            role: 'switchport',
+                            access_vlan: 1,
+                        },
+                    },
+                    {
+                        client_id: nextClientId(`${deviceId}-lan1`),
+                        name: 'lan1',
+                        ip_address: null,
+                        subnet_mask: null,
+                        metadata_json: {
+                            role: 'switchport',
+                            access_vlan: 1,
+                        },
+                    },
+                ]
+            : type === 'ap'
+              ? [
+                    {
+                        client_id: nextClientId(`${deviceId}-uplink0`),
+                        name: 'uplink0',
+                        ip_address: null,
+                        subnet_mask: null,
+                        metadata_json: {
+                            role: 'switchport',
+                            access_vlan: 1,
+                        },
+                    },
+                ]
+            : type === 'l2_switch' || type === 'l3_switch'
+              ? createSwitchInterfaces(deviceId, 8)
               : [
                     {
                         client_id: nextClientId(`${deviceId}-lan0`),
                         name: 'lan0',
                         ip_address: null,
                         subnet_mask: null,
+                        metadata_json: {},
                     },
                     {
                         client_id: nextClientId(`${deviceId}-wan0`),
                         name: 'wan0',
                         ip_address: null,
                         subnet_mask: null,
+                        metadata_json: {},
                     },
                 ];
 
@@ -409,7 +568,22 @@ const createDeviceTemplate = (
         position_x: position.x,
         position_y: position.y,
         default_gateway: null,
-        metadata_json: type === 'switch' ? { switch_mode: 'l2' } : {},
+        metadata_json:
+            type === 'l2_switch'
+                ? { switch_mode: 'l2', port_count: 8 }
+                : type === 'l3_switch'
+                  ? { switch_mode: 'l3', port_count: 8 }
+                  : type === 'ap'
+                    ? {
+                          ssid_profiles: [
+                              {
+                                  name: 'CorpWiFi',
+                                  vlan_id: 10,
+                                  security: 'wpa2_psk',
+                              },
+                          ],
+                      }
+                  : {},
         interfaces,
         route_entries: [],
     };
@@ -472,11 +646,15 @@ export default function NetworkEditor() {
     const [projectId, setProjectId] = useState<number | null>(null);
     const [project, setProject] = useState<TopologyProject>(initialProject);
     const [selectedNodeId, setSelectedNodeId] = useState<string>('device-router-1');
-    const [isEditorOpen, setIsEditorOpen] = useState(true);
+    const [isEditorOpen, setIsEditorOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [isProjectListLoading, setIsProjectListLoading] = useState(false);
+    const [isOpeningProject, setIsOpeningProject] = useState(false);
     const [isReloading, setIsReloading] = useState(false);
     const [isSimulating, setIsSimulating] = useState(false);
     const [statusMessage, setStatusMessage] = useState('サンプルトポロジーは未保存です');
+    const [savedProjects, setSavedProjects] = useState<SavedProjectSummary[]>([]);
+    const [selectedSavedProjectId, setSelectedSavedProjectId] = useState<number | null>(null);
     const [pendingLinkInterfaceId, setPendingLinkInterfaceId] = useState<string | null>(null);
     const [pendingLinkTargetNodeId, setPendingLinkTargetNodeId] = useState<string | null>(null);
     const [pendingLinkTargetInterfaceId, setPendingLinkTargetInterfaceId] = useState<string | null>(null);
@@ -486,6 +664,8 @@ export default function NetworkEditor() {
     const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
+    const [selectedEditorTab, setSelectedEditorTab] = useState<EditorTab>('basic');
+    const [selectedInterfaceId, setSelectedInterfaceId] = useState<string | null>(null);
     const nextDevicePosition = {
         x: 80 + (project.devices.length % 4) * 180,
         y: 80 + Math.floor(project.devices.length / 4) * 120,
@@ -502,9 +682,9 @@ export default function NetworkEditor() {
     const selectedLabel = selectedDevice?.name ?? selectedCloud?.name ?? '未選択';
     const selectedType = selectedDevice?.type ?? selectedCloud?.type ?? null;
     const selectedInterface =
-        selectedDevice?.interfaces.find(
-            (iface) => iface.client_id === pendingLinkInterfaceId,
-        ) ?? null;
+        selectedDevice?.interfaces.find((iface) => iface.client_id === selectedInterfaceId) ??
+        selectedDevice?.interfaces[0] ??
+        null;
     const pendingTargetDevice =
         pendingLinkTargetNodeId !== null
             ? project.devices.find((device) => device.client_id === pendingLinkTargetNodeId) ??
@@ -565,10 +745,10 @@ export default function NetworkEditor() {
             };
         });
     const pingSourceOptions = project.devices.filter(
-        (device) => device.id !== undefined && device.type === 'pc',
+        (device) => device.type === 'pc' && device.id !== undefined,
     );
     const pingDestinationDeviceOptions = project.devices.filter(
-        (device) => device.id !== undefined && device.type === 'pc',
+        (device) => device.type === 'pc' && device.id !== undefined,
     );
     const pingDestinationCloudOptions = project.network_clouds.filter(
         (cloud) => cloud.id !== undefined,
@@ -588,6 +768,169 @@ export default function NetworkEditor() {
 
         return () => window.removeEventListener('keydown', handleKeydown);
     }, []);
+
+    useEffect(() => {
+        setSelectedEditorTab('basic');
+    }, [selectedNodeId]);
+
+    useEffect(() => {
+        if (!selectedDevice) {
+            setSelectedInterfaceId(null);
+            return;
+        }
+
+        if (
+            selectedInterfaceId === null ||
+            !selectedDevice.interfaces.some((iface) => iface.client_id === selectedInterfaceId)
+        ) {
+            setSelectedInterfaceId(selectedDevice.interfaces[0]?.client_id ?? null);
+        }
+    }, [selectedDevice, selectedInterfaceId]);
+
+    const applyLoadedProject = (loadedProject: TopologyProject, message: string) => {
+        setProject(loadedProject);
+        setProjectId(loadedProject.id ?? null);
+        setSelectedSavedProjectId(loadedProject.id ?? null);
+        setSelectedNodeId(
+            loadedProject.devices[0]?.client_id ??
+                loadedProject.network_clouds[0]?.client_id ??
+                '',
+        );
+        setPingSourceDeviceId(
+            loadedProject.devices.find((device: TopologyDevice) => device.type === 'pc')?.id ??
+                null,
+        );
+        setPingDestinationType(
+            loadedProject.network_clouds.length > 0 ? 'cloud' : 'device',
+        );
+        setPingDestinationId(
+            loadedProject.network_clouds[0]?.id ??
+                loadedProject.devices.find(
+                    (device: TopologyDevice) => device.type === 'pc',
+                )?.id ??
+                null,
+        );
+        setSimulationResult(null);
+        setContextMenu(null);
+        resetLinkMode();
+        setIsEditorOpen(false);
+        setStatusMessage(message);
+    };
+
+    const refreshSavedProjects = async (preferredProjectId?: number | null) => {
+        setIsProjectListLoading(true);
+
+        try {
+            const response = await fetch('/api/network-projects', {
+                headers: {
+                    Accept: 'application/json',
+                },
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                return;
+            }
+
+            const nextSavedProjects = (data.projects ?? []) as SavedProjectSummary[];
+            setSavedProjects(nextSavedProjects);
+            setSelectedSavedProjectId((currentSelection) => {
+                const candidateIds = [
+                    preferredProjectId ?? null,
+                    currentSelection,
+                    projectId,
+                    nextSavedProjects[0]?.id ?? null,
+                ];
+
+                for (const candidateId of candidateIds) {
+                    if (
+                        candidateId !== null &&
+                        nextSavedProjects.some((savedProject) => savedProject.id === candidateId)
+                    ) {
+                        return candidateId;
+                    }
+                }
+
+                return null;
+            });
+        } catch {
+            // Keep the editor usable even if the list endpoint is temporarily unavailable.
+        } finally {
+            setIsProjectListLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        void refreshSavedProjects();
+    }, []);
+
+    useEffect(() => {
+        if (pingSourceOptions.length === 0) {
+            if (pingSourceDeviceId !== null) {
+                setPingSourceDeviceId(null);
+            }
+
+            return;
+        }
+
+        if (
+            pingSourceDeviceId === null ||
+            !pingSourceOptions.some((device) => device.id === pingSourceDeviceId)
+        ) {
+            setPingSourceDeviceId(pingSourceOptions[0]?.id ?? null);
+        }
+    }, [pingSourceDeviceId, pingSourceOptions]);
+
+    useEffect(() => {
+        if (projectId === null) {
+            return;
+        }
+
+        if (pingDestinationType === 'cloud') {
+            if (pingDestinationCloudOptions.length === 0) {
+                if (pingDestinationId !== null) {
+                    setPingDestinationId(null);
+                }
+
+                return;
+            }
+
+            if (
+                pingDestinationId === null ||
+                !pingDestinationCloudOptions.some((cloud) => cloud.id === pingDestinationId)
+            ) {
+                setPingDestinationId(pingDestinationCloudOptions[0]?.id ?? null);
+            }
+
+            return;
+        }
+
+        const availableDevices = pingDestinationDeviceOptions.filter(
+            (device) => device.id !== pingSourceDeviceId,
+        );
+
+        if (availableDevices.length === 0) {
+            if (pingDestinationId !== null) {
+                setPingDestinationId(null);
+            }
+
+            return;
+        }
+
+        if (
+            pingDestinationId === null ||
+            !availableDevices.some((device) => device.id === pingDestinationId)
+        ) {
+            setPingDestinationId(availableDevices[0]?.id ?? null);
+        }
+    }, [
+        pingDestinationCloudOptions,
+        pingDestinationDeviceOptions,
+        pingDestinationId,
+        pingDestinationType,
+        pingSourceDeviceId,
+        projectId,
+    ]);
 
     const resolveFlowPosition = (
         clientX: number,
@@ -711,6 +1054,30 @@ export default function NetworkEditor() {
         }));
     };
 
+    const updateNodePosition = (nodeId: string, position: { x: number; y: number }) => {
+        setProject((currentProject) => ({
+            ...currentProject,
+            devices: currentProject.devices.map((device) =>
+                device.client_id === nodeId
+                    ? {
+                          ...device,
+                          position_x: Math.round(position.x),
+                          position_y: Math.round(position.y),
+                      }
+                    : device,
+            ),
+            network_clouds: currentProject.network_clouds.map((cloud) =>
+                cloud.client_id === nodeId
+                    ? {
+                          ...cloud,
+                          position_x: Math.round(position.x),
+                          position_y: Math.round(position.y),
+                      }
+                    : cloud,
+            ),
+        }));
+    };
+
     const updateRouteEntry = (
         routeEntries: RouteEntry[],
         index: number,
@@ -752,26 +1119,61 @@ export default function NetworkEditor() {
                 return;
             }
 
-            setProject(data.project);
-            setProjectId(data.project.id);
-            setSelectedNodeId(
-                data.project.devices[0]?.client_id ??
-                    data.project.network_clouds[0]?.client_id ??
-                    '',
+            applyLoadedProject(
+                data.project,
+                `プロジェクト #${data.project.id} を保存しました`,
             );
-            setPingSourceDeviceId(data.project.devices.find((device: TopologyDevice) => device.type === 'pc')?.id ?? null);
-            setPingDestinationType(data.project.network_clouds.length > 0 ? 'cloud' : 'device');
-            setPingDestinationId(
-                data.project.network_clouds[0]?.id ??
-                    data.project.devices.find((device: TopologyDevice) => device.type === 'pc' && device.id !== pingSourceDeviceId)?.id ??
-                    null,
-            );
-            setStatusMessage(`プロジェクト #${data.project.id} を保存しました`);
+            void refreshSavedProjects(data.project.id);
         } catch {
             setStatusMessage('保存 API へ接続できませんでした');
         } finally {
             setIsSaving(false);
         }
+    };
+
+    const loadProject = async (
+        targetProjectId: number,
+        loadingMessage: string,
+        successMessage: string,
+        onComplete: () => void,
+    ) => {
+        setStatusMessage(loadingMessage);
+
+        try {
+            const response = await fetch(`/api/network-projects/${targetProjectId}`, {
+                headers: {
+                    Accept: 'application/json',
+                },
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                setStatusMessage(data.message ?? 'トポロジーの読込に失敗しました');
+                return;
+            }
+
+            applyLoadedProject(data.project, successMessage);
+            void refreshSavedProjects(data.project.id);
+        } catch {
+            setStatusMessage('読込 API へ接続できませんでした');
+        } finally {
+            onComplete();
+        }
+    };
+
+    const openSelectedProject = async () => {
+        if (selectedSavedProjectId === null) {
+            setStatusMessage('開くプロジェクトを選択してください');
+            return;
+        }
+
+        setIsOpeningProject(true);
+        await loadProject(
+            selectedSavedProjectId,
+            `プロジェクト #${selectedSavedProjectId} を読込しています...`,
+            `プロジェクト #${selectedSavedProjectId} を開きました`,
+            () => setIsOpeningProject(false),
+        );
     };
 
     const reloadProject = async () => {
@@ -781,40 +1183,12 @@ export default function NetworkEditor() {
         }
 
         setIsReloading(true);
-        setStatusMessage(`プロジェクト #${projectId} を再読込しています...`);
-
-        try {
-            const response = await fetch(`/api/network-projects/${projectId}`, {
-                headers: {
-                    Accept: 'application/json',
-                },
-            });
-            const data = await response.json();
-
-            if (!response.ok) {
-                setStatusMessage(data.message ?? 'トポロジーの再読込に失敗しました');
-                return;
-            }
-
-            setProject(data.project);
-            setSelectedNodeId(
-                data.project.devices[0]?.client_id ??
-                    data.project.network_clouds[0]?.client_id ??
-                    '',
-            );
-            setPingSourceDeviceId(data.project.devices.find((device: TopologyDevice) => device.type === 'pc')?.id ?? null);
-            setPingDestinationType(data.project.network_clouds.length > 0 ? 'cloud' : 'device');
-            setPingDestinationId(
-                data.project.network_clouds[0]?.id ??
-                    data.project.devices.find((device: TopologyDevice) => device.type === 'pc' && device.id !== pingSourceDeviceId)?.id ??
-                    null,
-            );
-            setStatusMessage(`プロジェクト #${data.project.id} を再読込しました`);
-        } catch {
-            setStatusMessage('再読込 API へ接続できませんでした');
-        } finally {
-            setIsReloading(false);
-        }
+        await loadProject(
+            projectId,
+            `プロジェクト #${projectId} を再読込しています...`,
+            `プロジェクト #${projectId} を再読込しました`,
+            () => setIsReloading(false),
+        );
     };
 
     const addDevice = (type: DeviceType, position: FlowPosition = nextDevicePosition) => {
@@ -1167,8 +1541,14 @@ export default function NetworkEditor() {
                             selectedLabel={selectedLabel}
                             statusTone={statusTone}
                             statusMessage={statusMessage}
+                            savedProjects={savedProjects}
+                            selectedSavedProjectId={selectedSavedProjectId}
                             isSaving={isSaving}
+                            isProjectListLoading={isProjectListLoading}
+                            isOpeningProject={isOpeningProject}
                             isReloading={isReloading}
+                            onSelectSavedProject={setSelectedSavedProjectId}
+                            onOpenSelectedProject={openSelectedProject}
                             onSave={saveProject}
                             onReload={reloadProject}
                             onReset={() => {
@@ -1181,6 +1561,7 @@ export default function NetworkEditor() {
                                 setPingDestinationId(null);
                                 setSimulationResult(null);
                                 resetLinkMode();
+                                setSelectedSavedProjectId(savedProjects[0]?.id ?? null);
                                 setStatusMessage('サンプルトポロジーに戻しました');
                             }}
                         />
@@ -1205,6 +1586,8 @@ export default function NetworkEditor() {
                         >
                             <ReactFlow
                                 fitView
+                                minZoom={0.2}
+                                maxZoom={4}
                                 nodes={nodes}
                                 edges={edges}
                                 nodeTypes={nodeTypes}
@@ -1217,45 +1600,11 @@ export default function NetworkEditor() {
                                     resetLinkMode();
                                     setContextMenu(null);
                                 }}
+                                onNodeDrag={(_, node) =>
+                                    updateNodePosition(node.id, node.position)
+                                }
                                 onNodeDragStop={(_, node) =>
-                                    setProject((currentProject) => ({
-                                        ...currentProject,
-                                        devices: currentProject.devices.map(
-                                            (device) =>
-                                                device.client_id === node.id
-                                                    ? {
-                                                          ...device,
-                                                          position_x: Math.round(
-                                                              node.position.x,
-                                                          ),
-                                                          position_y: Math.round(
-                                                              node.position.y,
-                                                          ),
-                                                      }
-                                                    : device,
-                                        ),
-                                        network_clouds:
-                                            currentProject.network_clouds.map(
-                                                (cloud) =>
-                                                    cloud.client_id === node.id
-                                                        ? {
-                                                              ...cloud,
-                                                              position_x:
-                                                                  Math.round(
-                                                                      node
-                                                                          .position
-                                                                          .x,
-                                                                  ),
-                                                              position_y:
-                                                                  Math.round(
-                                                                      node
-                                                                          .position
-                                                                          .y,
-                                                                  ),
-                                                          }
-                                                        : cloud,
-                                            ),
-                                    }))
+                                    updateNodePosition(node.id, node.position)
                                 }
                             >
                                 <Background color="#1f2937" gap={20} />
@@ -1269,60 +1618,8 @@ export default function NetworkEditor() {
                     </section>
 
                     <aside className="sidebar-card">
-                        <div className="selected-summary-card">
-                            <div className="selected-summary-head">
-                                <div>
-                                    <p className="panel-label">ワークスペース</p>
-                                    <strong className="selected-summary-title">{project.name}</strong>
-                                </div>
-                                {props.milestone && (
-                                    <span className="selected-summary-badge">
-                                        {props.milestone}
-                                    </span>
-                                )}
-                            </div>
-                            <p className="selected-summary-text">
-                                キャンバス上で右クリックすると機器追加、ノード上で右クリックすると編集や削除を開けます。
-                            </p>
-                            {selectedType && (
-                                <p className="selected-summary-text">
-                                    選択中: <strong>{selectedLabel}</strong> ({deviceTypeLabel(selectedType)})
-                                </p>
-                            )}
-                            {(pendingLinkInterfaceId !== null ||
-                                pendingLinkTargetNodeId !== null) && (
-                                <div className="pending-link-card">
-                                    <span className="detail-heading">接続準備中</span>
-                                    {selectedInterface && (
-                                        <p className="selected-summary-text">
-                                            接続元: <strong>{selectedInterface.name}</strong>
-                                        </p>
-                                    )}
-                                    {pendingTargetDevice && (
-                                        <p className="selected-summary-text">
-                                            接続先: <strong>{pendingTargetDevice.name}</strong>
-                                        </p>
-                                    )}
-                                    {pendingTargetCloud && (
-                                        <p className="selected-summary-text">
-                                            接続先クラウド: <strong>{pendingTargetCloud.name}</strong>
-                                        </p>
-                                    )}
-                                    <button
-                                        type="button"
-                                        className="action-button"
-                                        onClick={() => {
-                                            resetLinkMode();
-                                            setStatusMessage('接続モードを解除しました');
-                                        }}
-                                    >
-                                        接続モードを解除
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-
                         <PingPanel
+                            projectId={projectId}
                             pingSourceDeviceId={pingSourceDeviceId}
                             pingDestinationType={pingDestinationType}
                             pingDestinationId={pingDestinationId}
@@ -1346,23 +1643,6 @@ export default function NetworkEditor() {
                             onRunPingSimulation={runPingSimulation}
                         />
 
-                        <ProjectPanel
-                            name={project.name}
-                            description={project.description}
-                            onNameChange={(value) =>
-                                setProject((currentProject) => ({
-                                    ...currentProject,
-                                    name: value,
-                                }))
-                            }
-                            onDescriptionChange={(value) =>
-                                setProject((currentProject) => ({
-                                    ...currentProject,
-                                    description: value,
-                                }))
-                            }
-                        />
-
                     </aside>
                 </section>
 
@@ -1370,7 +1650,8 @@ export default function NetworkEditor() {
                     <TopologyContextMenu
                         contextMenu={contextMenu}
                         canAddInterface={
-                            selectedDevice?.client_id === contextMenu.targetNodeId
+                            selectedDevice?.client_id === contextMenu.targetNodeId &&
+                            !isSwitch(selectedDevice)
                         }
                         onAddDevice={addDevice}
                         onAddCloud={addCloud}
@@ -1380,18 +1661,27 @@ export default function NetworkEditor() {
                             setContextMenu(null);
                         }}
                         onAddInterface={() => {
-                            updateSelectedDevice((device) => ({
-                                ...device,
-                                interfaces: [
-                                    ...device.interfaces,
-                                    {
-                                        client_id: nextClientId(`${device.client_id}-iface`),
-                                        name: `if${device.interfaces.length}`,
-                                        ip_address: null,
-                                        subnet_mask: null,
-                                    },
-                                ],
-                            }));
+                            updateSelectedDevice((device) =>
+                                device.type === 'l2_switch' ||
+                                device.type === 'l3_switch'
+                                    ? resizeSwitchInterfaces(
+                                          device,
+                                          switchPortCount(device) + 1,
+                                      )
+                                    : {
+                                          ...device,
+                                          interfaces: [
+                                              ...device.interfaces,
+                                              {
+                                                  client_id: nextClientId(`${device.client_id}-iface`),
+                                                  name: `if${device.interfaces.length}`,
+                                                  ip_address: null,
+                                                  subnet_mask: null,
+                                                  metadata_json: {},
+                                              },
+                                          ],
+                                      },
+                            );
                             setIsEditorOpen(true);
                             setContextMenu(null);
                         }}
@@ -1506,335 +1796,629 @@ export default function NetworkEditor() {
                                 </div>
                             )}
 
+                            <div className="editor-tabs" role="tablist" aria-label="ノード編集タブ">
+                                <button
+                                    type="button"
+                                    className={`editor-tab ${selectedEditorTab === 'basic' ? 'is-active' : ''}`}
+                                    onClick={() => setSelectedEditorTab('basic')}
+                                >
+                                    基本設定
+                                </button>
+                                {selectedDevice && (
+                                    <button
+                                        type="button"
+                                        className={`editor-tab ${selectedEditorTab === 'interfaces' ? 'is-active' : ''}`}
+                                        onClick={() => setSelectedEditorTab('interfaces')}
+                                    >
+                                        インターフェース
+                                    </button>
+                                )}
+                                {selectedDevice && supportsStaticRouting(selectedDevice) && (
+                                    <button
+                                        type="button"
+                                        className={`editor-tab ${selectedEditorTab === 'routing' ? 'is-active' : ''}`}
+                                        onClick={() => setSelectedEditorTab('routing')}
+                                    >
+                                        ルーティング
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    className={`editor-tab ${selectedEditorTab === 'links' ? 'is-active' : ''}`}
+                                    onClick={() => setSelectedEditorTab('links')}
+                                >
+                                    接続
+                                </button>
+                            </div>
+
                             {selectedDevice && (
                                 <div className="field-stack">
                                     <div className="editor-banner">
                                         <strong>{selectedDevice.name}</strong>
                                         <span>{buildDeviceCategory(selectedDevice)}</span>
                                     </div>
-                                    <div className="modal-form-grid">
-                                        <label className="field-group">
-                                            <span>機器名</span>
-                                            <input
-                                                className="editor-input"
-                                                value={selectedDevice.name}
-                                                onChange={(event) =>
-                                                    updateSelectedDevice((device) => ({
-                                                        ...device,
-                                                        name: event.target.value,
-                                                    }))
-                                                }
-                                            />
-                                        </label>
-
-                                        {selectedDevice.type === 'switch' && (
+                                    {selectedEditorTab === 'basic' && (
+                                        <div className="modal-form-grid">
                                             <label className="field-group">
-                                                <span>スイッチ種別</span>
-                                                <select
+                                                <span>機器名</span>
+                                                <input
                                                     className="editor-input"
-                                                    value={getSwitchMode(selectedDevice)}
+                                                    value={selectedDevice.name}
                                                     onChange={(event) =>
                                                         updateSelectedDevice((device) => ({
                                                             ...device,
-                                                            metadata_json: {
-                                                                ...device.metadata_json,
-                                                                switch_mode: event.target.value,
-                                                            },
+                                                            name: event.target.value,
                                                         }))
                                                     }
-                                                >
-                                                    <option value="l2">L2 スイッチ</option>
-                                                    <option value="l3">L3 スイッチ</option>
-                                                </select>
+                                                />
                                             </label>
-                                        )}
 
-                                        <label className="field-group">
-                                            <span>デフォルトゲートウェイ</span>
-                                            <input
-                                                className="editor-input"
-                                                value={selectedDevice.default_gateway ?? ''}
-                                                onChange={(event) =>
-                                                    updateSelectedDevice((device) => ({
-                                                        ...device,
-                                                        default_gateway:
-                                                            event.target.value || null,
-                                                    }))
-                                                }
-                                            />
-                                        </label>
-                                    </div>
+                                            {supportsHostDefaultGateway(selectedDevice) && (
+                                                <label className="field-group">
+                                                    <span>デフォルトゲートウェイ</span>
+                                                    <input
+                                                        className="editor-input"
+                                                        value={selectedDevice.default_gateway ?? ''}
+                                                        onChange={(event) =>
+                                                            updateSelectedDevice((device) => ({
+                                                                ...device,
+                                                                default_gateway:
+                                                                    event.target.value || null,
+                                                            }))
+                                                        }
+                                                    />
+                                                </label>
+                                            )}
 
-                                    <div className="detail-section">
-                                        <div className="detail-heading-row">
-                                            <span className="detail-heading">インターフェース</span>
-                                            <button
-                                                type="button"
-                                                className="mini-button"
-                                                onClick={() =>
-                                                    updateSelectedDevice((device) => ({
-                                                        ...device,
-                                                        interfaces: [
-                                                            ...device.interfaces,
-                                                            {
-                                                                client_id: nextClientId(`${device.client_id}-iface`),
-                                                                name: `if${device.interfaces.length}`,
-                                                                ip_address: null,
-                                                                subnet_mask: null,
-                                                            },
-                                                        ],
-                                                    }))
-                                                }
-                                            >
-                                                追加
-                                            </button>
-                                        </div>
-                                        {selectedDevice.interfaces.map((iface, index) => (
-                                            <div key={iface.client_id} className="detail-card">
-                                                <div className="inline-link-row">
-                                                    <span>
-                                                        {project.links.some(
-                                                            (link) =>
-                                                                link.interface_a_client_id === iface.client_id ||
-                                                                link.interface_b_client_id === iface.client_id,
-                                                        )
-                                                            ? '接続中'
-                                                            : '未使用'}
-                                                    </span>
-                                                    <span className="hop-meta">{iface.name}</span>
-                                                </div>
-                                                <div className="modal-form-grid">
-                                                    <label className="field-group">
-                                                        <span>名称</span>
-                                                        <input
-                                                            className="editor-input"
-                                                            value={iface.name}
-                                                            onChange={(event) =>
-                                                                updateSelectedDevice((device) => ({
-                                                                    ...device,
-                                                                    interfaces: device.interfaces.map(
-                                                                        (deviceInterface, interfaceIndex) =>
-                                                                            interfaceIndex === index
-                                                                                ? {
-                                                                                      ...deviceInterface,
-                                                                                      name: event.target.value,
-                                                                                  }
-                                                                                : deviceInterface,
-                                                                    ),
-                                                                }))
-                                                            }
-                                                        />
-                                                    </label>
-                                                    <label className="field-group">
-                                                        <span>IP アドレス</span>
-                                                        <input
-                                                            className="editor-input"
-                                                            value={iface.ip_address ?? ''}
-                                                            onChange={(event) =>
-                                                                updateSelectedDevice((device) => ({
-                                                                    ...device,
-                                                                    interfaces: device.interfaces.map(
-                                                                        (deviceInterface, interfaceIndex) =>
-                                                                            interfaceIndex === index
-                                                                                ? {
-                                                                                      ...deviceInterface,
-                                                                                      ip_address:
-                                                                                          event.target.value || null,
-                                                                                  }
-                                                                                : deviceInterface,
-                                                                    ),
-                                                                }))
-                                                            }
-                                                        />
-                                                    </label>
-                                                    <label className="field-group">
-                                                        <span>サブネットマスク</span>
-                                                        <input
-                                                            className="editor-input"
-                                                            value={iface.subnet_mask ?? ''}
-                                                            onChange={(event) =>
-                                                                updateSelectedDevice((device) => ({
-                                                                    ...device,
-                                                                    interfaces: device.interfaces.map(
-                                                                        (deviceInterface, interfaceIndex) =>
-                                                                            interfaceIndex === index
-                                                                                ? {
-                                                                                      ...deviceInterface,
-                                                                                      subnet_mask:
-                                                                                          event.target.value || null,
-                                                                                  }
-                                                                                : deviceInterface,
-                                                                    ),
-                                                                }))
-                                                            }
-                                                        />
-                                                    </label>
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    className={`action-button ${
-                                                        pendingLinkInterfaceId === iface.client_id
-                                                            ? 'primary'
-                                                            : ''
-                                                    }`}
-                                                    onClick={() =>
-                                                        pendingLinkInterfaceId === iface.client_id
-                                                            ? resetLinkMode()
-                                                            : (() => {
-                                                                  setPendingLinkInterfaceId(iface.client_id);
-                                                                  setPendingLinkTargetNodeId(null);
-                                                                  setPendingLinkTargetInterfaceId(null);
-                                                                  setStatusMessage(
-                                                                      `${iface.name} の接続先ノードを選択してください`,
-                                                                  );
-                                                              })()
-                                                    }
-                                                >
-                                                    {pendingLinkInterfaceId === iface.client_id
-                                                        ? '接続元として選択中'
-                                                        : 'このインターフェースから接続'}
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
+                                            {(selectedDevice.type === 'l2_switch' ||
+                                                selectedDevice.type === 'l3_switch') && (
+                                                <label className="field-group">
+                                                    <span>ポート数</span>
+                                                    <select
+                                                        className="editor-input"
+                                                        value={String(switchPortCount(selectedDevice))}
+                                                        onChange={(event) =>
+                                                            updateSelectedDevice((device) =>
+                                                                resizeSwitchInterfaces(
+                                                                    device,
+                                                                    Number(event.target.value),
+                                                                ),
+                                                            )
+                                                        }
+                                                    >
+                                                        {SWITCH_PORT_COUNT_OPTIONS.map((portCount) => (
+                                                            <option key={portCount} value={portCount}>
+                                                                {portCount} ポート
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </label>
+                                            )}
 
-                                    <div className="detail-section">
-                                        <div className="detail-heading-row">
-                                            <span className="detail-heading">スタティックルート</span>
-                                            <button
-                                                type="button"
-                                                className="mini-button"
-                                                onClick={() =>
-                                                    updateSelectedDevice((device) => ({
-                                                        ...device,
-                                                        route_entries: [
-                                                            ...device.route_entries,
-                                                            {
-                                                                destination_network: '',
-                                                                subnet_mask: '',
-                                                                next_hop: null,
-                                                                outgoing_interface_client_id: null,
-                                                            },
-                                                        ],
-                                                    }))
-                                                }
-                                            >
-                                                追加
-                                            </button>
-                                        </div>
-                                        {selectedDevice.route_entries.length === 0 && (
-                                            <p className="selected-summary-text">
-                                                スタティックルートはまだありません。
-                                            </p>
-                                        )}
-                                        {selectedDevice.route_entries.map((routeEntry, index) => (
-                                            <div
-                                                key={`${selectedDevice.client_id}-route-${index}`}
-                                                className="detail-card"
-                                            >
-                                                <div className="modal-form-grid">
-                                                    <label className="field-group">
-                                                        <span>宛先ネットワーク</span>
-                                                        <input
-                                                            className="editor-input"
-                                                            value={routeEntry.destination_network}
-                                                            onChange={(event) =>
+                                            {selectedDevice.type === 'ap' && (
+                                                <div className="detail-section">
+                                                    <div className="detail-heading-row">
+                                                        <span className="detail-heading">SSID</span>
+                                                        <button
+                                                            type="button"
+                                                            className="mini-button"
+                                                            onClick={() =>
                                                                 updateSelectedDevice((device) => ({
                                                                     ...device,
-                                                                    route_entries: updateRouteEntry(
-                                                                        device.route_entries,
-                                                                        index,
-                                                                        'destination_network',
-                                                                        event.target.value,
-                                                                    ),
-                                                                }))
-                                                            }
-                                                        />
-                                                    </label>
-                                                    <label className="field-group">
-                                                        <span>マスク</span>
-                                                        <input
-                                                            className="editor-input"
-                                                            value={routeEntry.subnet_mask}
-                                                            onChange={(event) =>
-                                                                updateSelectedDevice((device) => ({
-                                                                    ...device,
-                                                                    route_entries: updateRouteEntry(
-                                                                        device.route_entries,
-                                                                        index,
-                                                                        'subnet_mask',
-                                                                        event.target.value,
-                                                                    ),
-                                                                }))
-                                                            }
-                                                        />
-                                                    </label>
-                                                    <label className="field-group">
-                                                        <span>ネクストホップ</span>
-                                                        <input
-                                                            className="editor-input"
-                                                            value={routeEntry.next_hop ?? ''}
-                                                            onChange={(event) =>
-                                                                updateSelectedDevice((device) => ({
-                                                                    ...device,
-                                                                    route_entries: updateRouteEntry(
-                                                                        device.route_entries,
-                                                                        index,
-                                                                        'next_hop',
-                                                                        event.target.value,
-                                                                    ),
-                                                                }))
-                                                            }
-                                                        />
-                                                    </label>
-                                                    <label className="field-group">
-                                                        <span>送信インターフェース</span>
-                                                        <select
-                                                            className="editor-input"
-                                                            value={routeEntry.outgoing_interface_client_id ?? ''}
-                                                            onChange={(event) =>
-                                                                updateSelectedDevice((device) => ({
-                                                                    ...device,
-                                                                    route_entries: updateRouteEntry(
-                                                                        device.route_entries,
-                                                                        index,
-                                                                        'outgoing_interface_client_id',
-                                                                        event.target.value,
-                                                                    ),
+                                                                    metadata_json: {
+                                                                        ...device.metadata_json,
+                                                                        ssid_profiles: [
+                                                                            ...apSsidProfiles(device),
+                                                                            {
+                                                                                name: `SSID-${apSsidProfiles(device).length + 1}`,
+                                                                                vlan_id: 1,
+                                                                                security: 'wpa2_psk',
+                                                                            },
+                                                                        ],
+                                                                    },
                                                                 }))
                                                             }
                                                         >
-                                                            <option value="">インターフェースを選択</option>
-                                                            {selectedDevice.interfaces.map((iface) => (
-                                                                <option
-                                                                    key={iface.client_id}
-                                                                    value={iface.client_id}
-                                                                >
-                                                                    {iface.name}
-                                                                </option>
-                                                            ))}
-                                                        </select>
-                                                    </label>
+                                                            追加
+                                                        </button>
+                                                    </div>
+                                                    {apSsidProfiles(selectedDevice).map((profile, index) => (
+                                                        <div
+                                                            key={`${selectedDevice.client_id}-ssid-${index}`}
+                                                            className="detail-card"
+                                                        >
+                                                            <div className="modal-form-grid">
+                                                                <label className="field-group">
+                                                                    <span>SSID 名</span>
+                                                                    <input
+                                                                        className="editor-input"
+                                                                        value={profile.name}
+                                                                        onChange={(event) =>
+                                                                            updateSelectedDevice((device) => ({
+                                                                                ...device,
+                                                                                metadata_json: {
+                                                                                    ...device.metadata_json,
+                                                                                    ssid_profiles: apSsidProfiles(device).map(
+                                                                                        (currentProfile, profileIndex) =>
+                                                                                            profileIndex === index
+                                                                                                ? {
+                                                                                                      ...currentProfile,
+                                                                                                      name: event.target.value,
+                                                                                                  }
+                                                                                                : currentProfile,
+                                                                                    ),
+                                                                                },
+                                                                            }))
+                                                                        }
+                                                                    />
+                                                                </label>
+                                                                <label className="field-group">
+                                                                    <span>VLAN</span>
+                                                                    <input
+                                                                        className="editor-input"
+                                                                        value={String(profile.vlan_id)}
+                                                                        onChange={(event) =>
+                                                                            updateSelectedDevice((device) => ({
+                                                                                ...device,
+                                                                                metadata_json: {
+                                                                                    ...device.metadata_json,
+                                                                                    ssid_profiles: apSsidProfiles(device).map(
+                                                                                        (currentProfile, profileIndex) =>
+                                                                                            profileIndex === index
+                                                                                                ? {
+                                                                                                      ...currentProfile,
+                                                                                                      vlan_id: Number(
+                                                                                                          event.target.value || 1,
+                                                                                                      ),
+                                                                                                  }
+                                                                                                : currentProfile,
+                                                                                    ),
+                                                                                },
+                                                                            }))
+                                                                        }
+                                                                    />
+                                                                </label>
+                                                                <label className="field-group">
+                                                                    <span>認証</span>
+                                                                    <select
+                                                                        className="editor-input"
+                                                                        value={profile.security}
+                                                                        onChange={(event) =>
+                                                                            updateSelectedDevice((device) => ({
+                                                                                ...device,
+                                                                                metadata_json: {
+                                                                                    ...device.metadata_json,
+                                                                                    ssid_profiles: apSsidProfiles(device).map(
+                                                                                        (currentProfile, profileIndex) =>
+                                                                                            profileIndex === index
+                                                                                                ? {
+                                                                                                      ...currentProfile,
+                                                                                                      security: event.target.value,
+                                                                                                  }
+                                                                                                : currentProfile,
+                                                                                    ),
+                                                                                },
+                                                                            }))
+                                                                        }
+                                                                    >
+                                                                        <option value="open">Open</option>
+                                                                        <option value="wpa2_psk">WPA2-PSK</option>
+                                                                        <option value="wpa3_psk">WPA3-PSK</option>
+                                                                    </select>
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {selectedEditorTab === 'interfaces' && (
+                                        <div className="interface-editor-layout">
+                                            <div className="detail-section">
+                                                <div className="detail-heading-row">
+                                                    <span className="detail-heading">インターフェース</span>
+                                                    {!isSwitch(selectedDevice) && (
+                                                        <button
+                                                            type="button"
+                                                            className="mini-button"
+                                                            onClick={() =>
+                                                                updateSelectedDevice((device) => ({
+                                                                    ...device,
+                                                                    interfaces: [
+                                                                        ...device.interfaces,
+                                                                        {
+                                                                            client_id: nextClientId(`${device.client_id}-iface`),
+                                                                            name: `if${device.interfaces.length}`,
+                                                                            ip_address: null,
+                                                                            subnet_mask: null,
+                                                                            metadata_json: {},
+                                                                        },
+                                                                    ],
+                                                                }))
+                                                            }
+                                                        >
+                                                            追加
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                <div className="interface-list">
+                                                    {selectedDevice.interfaces.map((iface) => {
+                                                        const interfaceRole = interfaceRoleForDevice(
+                                                            selectedDevice,
+                                                            iface,
+                                                        );
+                                                        const linkStatus =
+                                                            interfaceRole === 'svi'
+                                                                ? '論理インターフェース'
+                                                                : project.links.some(
+                                                                      (link) =>
+                                                                          link.interface_a_client_id === iface.client_id ||
+                                                                          link.interface_b_client_id === iface.client_id,
+                                                                  )
+                                                                  ? '接続中'
+                                                                  : '未使用';
+
+                                                        return (
+                                                            <button
+                                                                key={iface.client_id}
+                                                                type="button"
+                                                                className={`interface-list-item ${selectedInterface?.client_id === iface.client_id ? 'is-active' : ''}`}
+                                                                onClick={() => setSelectedInterfaceId(iface.client_id)}
+                                                            >
+                                                                <strong>{iface.name}</strong>
+                                                                <span>{linkStatus}</span>
+                                                            </button>
+                                                        );
+                                                    })}
                                                 </div>
                                             </div>
-                                        ))}
-                                    </div>
 
-                                    {selectedNodeLinkSummaries.length > 0 && (
+                                            {selectedInterface && (
+                                                <div className="detail-card interface-editor-panel">
+                                                    {(() => {
+                                                        const iface = selectedInterface;
+                                                        const index = selectedDevice.interfaces.findIndex(
+                                                            (deviceInterface) =>
+                                                                deviceInterface.client_id === iface.client_id,
+                                                        );
+                                                        const interfaceRole = interfaceRoleForDevice(
+                                                            selectedDevice,
+                                                            iface,
+                                                        );
+
+                                                        return (
+                                                            <>
+                                                                <div className="inline-link-row">
+                                                                    <span>{iface.name}</span>
+                                                                    <span className="hop-meta">
+                                                                        {interfaceRole}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="modal-form-grid">
+                                                                    <label className="field-group">
+                                                                        <span>名称</span>
+                                                                        <input
+                                                                            className="editor-input"
+                                                                            value={iface.name}
+                                                                            onChange={(event) =>
+                                                                                updateSelectedDevice((device) => ({
+                                                                                    ...device,
+                                                                                    interfaces: device.interfaces.map(
+                                                                                        (deviceInterface, interfaceIndex) =>
+                                                                                            interfaceIndex === index
+                                                                                                ? {
+                                                                                                      ...deviceInterface,
+                                                                                                      name: event.target.value,
+                                                                                                  }
+                                                                                                : deviceInterface,
+                                                                                    ),
+                                                                                }))
+                                                                            }
+                                                                        />
+                                                                    </label>
+                                                                    {(selectedDevice.type === 'l2_switch' ||
+                                                                        selectedDevice.type === 'l3_switch') && (
+                                                                        <label className="field-group">
+                                                                            <span>インターフェース種別</span>
+                                                                            <select
+                                                                                className="editor-input"
+                                                                                value={interfaceRole}
+                                                                                disabled={selectedDevice.type === 'l2_switch'}
+                                                                                onChange={(event) =>
+                                                                                    updateSelectedDevice((device) => ({
+                                                                                        ...device,
+                                                                                        interfaces: device.interfaces.map(
+                                                                                            (deviceInterface, interfaceIndex) =>
+                                                                                                interfaceIndex === index
+                                                                                                    ? {
+                                                                                                          ...deviceInterface,
+                                                                                                          metadata_json:
+                                                                                                              event.target.value === 'svi'
+                                                                                                                  ? {
+                                                                                                                        role: 'svi',
+                                                                                                                        vlan_id: Number(
+                                                                                                                            deviceInterface.metadata_json?.access_vlan ??
+                                                                                                                                deviceInterface.metadata_json?.vlan_id ??
+                                                                                                                                1,
+                                                                                                                        ),
+                                                                                                                    }
+                                                                                                                  : event.target.value === 'routed'
+                                                                                                                    ? { role: 'routed' }
+                                                                                                                    : {
+                                                                                                                          role: 'switchport',
+                                                                                                                          access_vlan: Number(
+                                                                                                                              deviceInterface.metadata_json?.access_vlan ??
+                                                                                                                                  deviceInterface.metadata_json?.vlan_id ??
+                                                                                                                                  1,
+                                                                                                                          ),
+                                                                                                                      },
+                                                                                                      }
+                                                                                                    : deviceInterface,
+                                                                                        ),
+                                                                                    }))
+                                                                                }
+                                                                            >
+                                                                                <option value="switchport">Switchport</option>
+                                                                                <option value="svi">SVI</option>
+                                                                                <option value="routed">Routed</option>
+                                                                            </select>
+                                                                        </label>
+                                                                    )}
+                                                                    <label className="field-group">
+                                                                        <span>IP アドレス</span>
+                                                                        <input
+                                                                            className="editor-input"
+                                                                            value={iface.ip_address ?? ''}
+                                                                            onChange={(event) =>
+                                                                                updateSelectedDevice((device) => ({
+                                                                                    ...device,
+                                                                                    interfaces: device.interfaces.map(
+                                                                                        (deviceInterface, interfaceIndex) =>
+                                                                                            interfaceIndex === index
+                                                                                                ? {
+                                                                                                      ...deviceInterface,
+                                                                                                      ip_address: event.target.value || null,
+                                                                                                  }
+                                                                                                : deviceInterface,
+                                                                                    ),
+                                                                                }))
+                                                                            }
+                                                                        />
+                                                                    </label>
+                                                                    <label className="field-group">
+                                                                        <span>サブネットマスク</span>
+                                                                        <input
+                                                                            className="editor-input"
+                                                                            value={iface.subnet_mask ?? ''}
+                                                                            onChange={(event) =>
+                                                                                updateSelectedDevice((device) => ({
+                                                                                    ...device,
+                                                                                    interfaces: device.interfaces.map(
+                                                                                        (deviceInterface, interfaceIndex) =>
+                                                                                            interfaceIndex === index
+                                                                                                ? {
+                                                                                                      ...deviceInterface,
+                                                                                                      subnet_mask: event.target.value || null,
+                                                                                                  }
+                                                                                                : deviceInterface,
+                                                                                    ),
+                                                                                }))
+                                                                            }
+                                                                        />
+                                                                    </label>
+                                                                    {(interfaceRole === 'switchport' || interfaceRole === 'svi') && (
+                                                                        <label className="field-group">
+                                                                            <span>{interfaceRole === 'svi' ? 'SVI VLAN' : 'Access VLAN'}</span>
+                                                                            <input
+                                                                                className="editor-input"
+                                                                                value={String(interfaceRole === 'svi' ? iface.metadata_json?.vlan_id ?? 1 : iface.metadata_json?.access_vlan ?? 1)}
+                                                                                onChange={(event) =>
+                                                                                    updateSelectedDevice((device) => ({
+                                                                                        ...device,
+                                                                                        interfaces: device.interfaces.map(
+                                                                                            (deviceInterface, interfaceIndex) =>
+                                                                                                interfaceIndex === index
+                                                                                                    ? {
+                                                                                                          ...deviceInterface,
+                                                                                                          metadata_json:
+                                                                                                              interfaceRole === 'svi'
+                                                                                                                  ? {
+                                                                                                                        ...deviceInterface.metadata_json,
+                                                                                                                        role: 'svi',
+                                                                                                                        vlan_id: Number(event.target.value || 1),
+                                                                                                                    }
+                                                                                                                  : {
+                                                                                                                        ...deviceInterface.metadata_json,
+                                                                                                                        role: 'switchport',
+                                                                                                                        access_vlan: Number(event.target.value || 1),
+                                                                                                                    },
+                                                                                                      }
+                                                                                                    : deviceInterface,
+                                                                                        ),
+                                                                                    }))
+                                                                                }
+                                                                            />
+                                                                        </label>
+                                                                    )}
+                                                                </div>
+                                                                <button
+                                                                    type="button"
+                                                                    className={`action-button ${pendingLinkInterfaceId === iface.client_id ? 'primary' : ''}`}
+                                                                    disabled={interfaceRole === 'svi'}
+                                                                    onClick={() =>
+                                                                        interfaceRole === 'svi'
+                                                                            ? undefined
+                                                                            : pendingLinkInterfaceId === iface.client_id
+                                                                              ? resetLinkMode()
+                                                                              : (() => {
+                                                                                    setPendingLinkInterfaceId(iface.client_id);
+                                                                                    setPendingLinkTargetNodeId(null);
+                                                                                    setPendingLinkTargetInterfaceId(null);
+                                                                                    setStatusMessage(`${iface.name} の接続先ノードを選択してください`);
+                                                                                })()
+                                                                    }
+                                                                >
+                                                                    {pendingLinkInterfaceId === iface.client_id
+                                                                        ? '接続元として選択中'
+                                                                        : interfaceRole === 'svi'
+                                                                          ? 'SVI は直接接続できません'
+                                                                          : 'このインターフェースから接続'}
+                                                                </button>
+                                                            </>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {selectedEditorTab === 'routing' && supportsStaticRouting(selectedDevice) && (
                                         <div className="detail-section">
-                                            <span className="detail-heading">リンク</span>
-                                            {selectedNodeLinkSummaries.map((link) => (
-                                                <div key={link.client_id} className="inline-link-row">
-                                                    <span>{link.label}</span>
-                                                    <button
-                                                        type="button"
-                                                        className="mini-button"
-                                                        onClick={() => deleteLink(link.client_id)}
-                                                    >
-                                                        削除
-                                                    </button>
+                                            <div className="detail-heading-row">
+                                                <span className="detail-heading">スタティックルート</span>
+                                                <button
+                                                    type="button"
+                                                    className="mini-button"
+                                                    onClick={() =>
+                                                        updateSelectedDevice((device) => ({
+                                                            ...device,
+                                                            route_entries: [
+                                                                ...device.route_entries,
+                                                                {
+                                                                    destination_network: '',
+                                                                    subnet_mask: '',
+                                                                    next_hop: null,
+                                                                    outgoing_interface_client_id: null,
+                                                                },
+                                                            ],
+                                                        }))
+                                                    }
+                                                >
+                                                    追加
+                                                </button>
+                                            </div>
+                                            {selectedDevice.route_entries.length === 0 && (
+                                                <p className="selected-summary-text">
+                                                    スタティックルートはまだありません。
+                                                </p>
+                                            )}
+                                            {selectedDevice.route_entries.map((routeEntry, index) => (
+                                                <div
+                                                    key={`${selectedDevice.client_id}-route-${index}`}
+                                                    className="detail-card"
+                                                >
+                                                    <div className="modal-form-grid">
+                                                        <label className="field-group">
+                                                            <span>宛先ネットワーク</span>
+                                                            <input
+                                                                className="editor-input"
+                                                                value={routeEntry.destination_network}
+                                                                onChange={(event) =>
+                                                                    updateSelectedDevice((device) => ({
+                                                                        ...device,
+                                                                        route_entries: updateRouteEntry(
+                                                                            device.route_entries,
+                                                                            index,
+                                                                            'destination_network',
+                                                                            event.target.value,
+                                                                        ),
+                                                                    }))
+                                                                }
+                                                            />
+                                                        </label>
+                                                        <label className="field-group">
+                                                            <span>マスク</span>
+                                                            <input
+                                                                className="editor-input"
+                                                                value={routeEntry.subnet_mask}
+                                                                onChange={(event) =>
+                                                                    updateSelectedDevice((device) => ({
+                                                                        ...device,
+                                                                        route_entries: updateRouteEntry(
+                                                                            device.route_entries,
+                                                                            index,
+                                                                            'subnet_mask',
+                                                                            event.target.value,
+                                                                        ),
+                                                                    }))
+                                                                }
+                                                            />
+                                                        </label>
+                                                        <label className="field-group">
+                                                            <span>ネクストホップ</span>
+                                                            <input
+                                                                className="editor-input"
+                                                                value={routeEntry.next_hop ?? ''}
+                                                                onChange={(event) =>
+                                                                    updateSelectedDevice((device) => ({
+                                                                        ...device,
+                                                                        route_entries: updateRouteEntry(
+                                                                            device.route_entries,
+                                                                            index,
+                                                                            'next_hop',
+                                                                            event.target.value,
+                                                                        ),
+                                                                    }))
+                                                                }
+                                                            />
+                                                        </label>
+                                                        <label className="field-group">
+                                                            <span>送信インターフェース</span>
+                                                            <select
+                                                                className="editor-input"
+                                                                value={routeEntry.outgoing_interface_client_id ?? ''}
+                                                                onChange={(event) =>
+                                                                    updateSelectedDevice((device) => ({
+                                                                        ...device,
+                                                                        route_entries: updateRouteEntry(
+                                                                            device.route_entries,
+                                                                            index,
+                                                                            'outgoing_interface_client_id',
+                                                                            event.target.value,
+                                                                        ),
+                                                                    }))
+                                                                }
+                                                            >
+                                                                <option value="">インターフェースを選択</option>
+                                                                {selectedDevice.interfaces.map((iface) => (
+                                                                    <option
+                                                                        key={iface.client_id}
+                                                                        value={iface.client_id}
+                                                                    >
+                                                                        {iface.name}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                        </label>
+                                                    </div>
                                                 </div>
                                             ))}
+                                        </div>
+                                    )}
+
+                                    {selectedEditorTab === 'links' && (
+                                        <div className="detail-section">
+                                            <span className="detail-heading">リンク</span>
+                                            {selectedNodeLinkSummaries.length === 0 ? (
+                                                <p className="selected-summary-text">
+                                                    接続されているリンクはありません。
+                                                </p>
+                                            ) : (
+                                                selectedNodeLinkSummaries.map((link) => (
+                                                    <div key={link.client_id} className="inline-link-row">
+                                                        <span>{link.label}</span>
+                                                        <button
+                                                            type="button"
+                                                            className="mini-button"
+                                                            onClick={() => deleteLink(link.client_id)}
+                                                        >
+                                                            削除
+                                                        </button>
+                                                    </div>
+                                                ))
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -1846,79 +2430,87 @@ export default function NetworkEditor() {
                                         <strong>{selectedCloud.name}</strong>
                                         <span>{selectedCloud.type}</span>
                                     </div>
-                                    <div className="modal-form-grid">
-                                        <label className="field-group">
-                                            <span>クラウド名</span>
-                                            <input
-                                                className="editor-input"
-                                                value={selectedCloud.name}
-                                                onChange={(event) =>
-                                                    updateSelectedCloud((cloud) => ({
-                                                        ...cloud,
-                                                        name: event.target.value,
-                                                    }))
-                                                }
-                                            />
-                                        </label>
-                                        <label className="field-group">
-                                            <span>代表 IP</span>
-                                            <input
-                                                className="editor-input"
-                                                value={selectedCloud.representative_ip ?? ''}
-                                                onChange={(event) =>
-                                                    updateSelectedCloud((cloud) => ({
-                                                        ...cloud,
-                                                        representative_ip:
-                                                            event.target.value || null,
-                                                    }))
-                                                }
-                                            />
-                                        </label>
-                                        <label className="field-group">
-                                            <span>ネットワークアドレス</span>
-                                            <input
-                                                className="editor-input"
-                                                value={selectedCloud.network_address ?? ''}
-                                                onChange={(event) =>
-                                                    updateSelectedCloud((cloud) => ({
-                                                        ...cloud,
-                                                        network_address:
-                                                            event.target.value || null,
-                                                    }))
-                                                }
-                                            />
-                                        </label>
-                                        <label className="field-group">
-                                            <span>サブネットマスク</span>
-                                            <input
-                                                className="editor-input"
-                                                value={selectedCloud.subnet_mask ?? ''}
-                                                onChange={(event) =>
-                                                    updateSelectedCloud((cloud) => ({
-                                                        ...cloud,
-                                                        subnet_mask:
-                                                            event.target.value || null,
-                                                    }))
-                                                }
-                                            />
-                                        </label>
-                                    </div>
+                                    {selectedEditorTab === 'basic' && (
+                                        <div className="modal-form-grid">
+                                            <label className="field-group">
+                                                <span>クラウド名</span>
+                                                <input
+                                                    className="editor-input"
+                                                    value={selectedCloud.name}
+                                                    onChange={(event) =>
+                                                        updateSelectedCloud((cloud) => ({
+                                                            ...cloud,
+                                                            name: event.target.value,
+                                                        }))
+                                                    }
+                                                />
+                                            </label>
+                                            <label className="field-group">
+                                                <span>代表 IP</span>
+                                                <input
+                                                    className="editor-input"
+                                                    value={selectedCloud.representative_ip ?? ''}
+                                                    onChange={(event) =>
+                                                        updateSelectedCloud((cloud) => ({
+                                                            ...cloud,
+                                                            representative_ip:
+                                                                event.target.value || null,
+                                                        }))
+                                                    }
+                                                />
+                                            </label>
+                                            <label className="field-group">
+                                                <span>ネットワークアドレス</span>
+                                                <input
+                                                    className="editor-input"
+                                                    value={selectedCloud.network_address ?? ''}
+                                                    onChange={(event) =>
+                                                        updateSelectedCloud((cloud) => ({
+                                                            ...cloud,
+                                                            network_address:
+                                                                event.target.value || null,
+                                                        }))
+                                                    }
+                                                />
+                                            </label>
+                                            <label className="field-group">
+                                                <span>サブネットマスク</span>
+                                                <input
+                                                    className="editor-input"
+                                                    value={selectedCloud.subnet_mask ?? ''}
+                                                    onChange={(event) =>
+                                                        updateSelectedCloud((cloud) => ({
+                                                            ...cloud,
+                                                            subnet_mask:
+                                                                event.target.value || null,
+                                                        }))
+                                                    }
+                                                />
+                                            </label>
+                                        </div>
+                                    )}
 
-                                    {selectedNodeLinkSummaries.length > 0 && (
+                                    {selectedEditorTab === 'links' && (
                                         <div className="detail-section">
                                             <span className="detail-heading">リンク</span>
-                                            {selectedNodeLinkSummaries.map((link) => (
-                                                <div key={link.client_id} className="inline-link-row">
-                                                    <span>{link.label}</span>
-                                                    <button
-                                                        type="button"
-                                                        className="mini-button"
-                                                        onClick={() => deleteLink(link.client_id)}
-                                                    >
-                                                        削除
-                                                    </button>
-                                                </div>
-                                            ))}
+                                            {selectedNodeLinkSummaries.length === 0 ? (
+                                                <p className="selected-summary-text">
+                                                    接続されているリンクはありません。
+                                                </p>
+                                            ) : (
+                                                selectedNodeLinkSummaries.map((link) => (
+                                                    <div key={link.client_id} className="inline-link-row">
+                                                        <span>{link.label}</span>
+                                                        <button
+                                                            type="button"
+                                                            className="mini-button"
+                                                            onClick={() => deleteLink(link.client_id)}
+                                                        >
+                                                            削除
+                                                        </button>
+                                                    </div>
+                                                ))
+                                            )}
                                         </div>
                                     )}
                                 </div>

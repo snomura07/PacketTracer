@@ -1,6 +1,7 @@
 import type { SimulationResult, TopologyCloud, TopologyDevice } from '../Types/network';
 
 type PingPanelProps = {
+    projectId: number | null;
     pingSourceDeviceId: number | null;
     pingDestinationType: 'device' | 'cloud';
     pingDestinationId: number | null;
@@ -16,6 +17,7 @@ type PingPanelProps = {
 };
 
 export default function PingPanel({
+    projectId,
     pingSourceDeviceId,
     pingDestinationType,
     pingDestinationId,
@@ -32,12 +34,18 @@ export default function PingPanel({
     return (
         <div className="selected-card">
             <p className="panel-label">Ping シミュレーション</p>
+            {projectId === null && (
+                <p className="selected-summary-text">
+                    Ping 実行の前にプロジェクトを保存してください。保存後に送信元と宛先を選択できます。
+                </p>
+            )}
             <div className="field-stack">
                 <label className="field-group">
                     <span>送信元 PC</span>
                     <select
                         className="editor-input"
                         value={pingSourceDeviceId ?? ''}
+                        disabled={projectId === null || pingSourceOptions.length === 0}
                         onChange={(event) =>
                             onPingSourceDeviceIdChange(
                                 event.target.value === '' ? null : Number(event.target.value),
@@ -57,6 +65,7 @@ export default function PingPanel({
                     <select
                         className="editor-input"
                         value={pingDestinationType}
+                        disabled={projectId === null}
                         onChange={(event) =>
                             onPingDestinationTypeChange(
                                 event.target.value as 'device' | 'cloud',
@@ -72,6 +81,12 @@ export default function PingPanel({
                     <select
                         className="editor-input"
                         value={pingDestinationId ?? ''}
+                        disabled={
+                            projectId === null ||
+                            (pingDestinationType === 'device'
+                                ? pingDestinationDeviceOptions.length === 0
+                                : pingDestinationCloudOptions.length === 0)
+                        }
                         onChange={(event) =>
                             onPingDestinationIdChange(
                                 event.target.value === '' ? null : Number(event.target.value),
@@ -98,7 +113,7 @@ export default function PingPanel({
                     type="button"
                     className="action-button primary"
                     onClick={onRunPingSimulation}
-                    disabled={isSimulating}
+                    disabled={isSimulating || projectId === null}
                 >
                     {isSimulating ? '実行中...' : 'Ping 実行'}
                 </button>

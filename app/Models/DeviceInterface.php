@@ -16,6 +16,11 @@ class DeviceInterface extends Model
         'name',
         'ip_address',
         'subnet_mask',
+        'metadata_json',
+    ];
+
+    protected $casts = [
+        'metadata_json' => 'array',
     ];
 
     public function device(): BelongsTo
