@@ -9,5 +9,6 @@ Route::prefix('network-projects')->group(function () {
     Route::post('/', [NetworkProjectController::class, 'store']);
     Route::get('/{networkProject}', [NetworkProjectController::class, 'show']);
     Route::put('/{networkProject}', [NetworkProjectController::class, 'update']);
+    Route::delete('/{networkProject}', [NetworkProjectController::class, 'destroy']);
     Route::post('/{networkProject}/simulate/ping', PingSimulationController::class);
 });

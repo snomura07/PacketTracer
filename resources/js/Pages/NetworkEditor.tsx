@@ -13,6 +13,7 @@ import {
 } from 'reactflow';
 import ArpTablePanel from '../Components/ArpTablePanel';
 import PingPanel from '../Components/PingPanel';
+import ProjectManagerModal from '../Components/ProjectManagerModal';
 import ProjectToolbar from '../Components/ProjectToolbar';
 import TopologyNode from '../Components/TopologyNode';
 import TopologyContextMenu from '../Components/TopologyContextMenu';
@@ -49,6 +50,7 @@ type ContextMenuState = {
 };
 
 type EditorTab = 'basic' | 'interfaces' | 'routing' | 'links';
+type PendingProjectAction = 'new' | 'open' | 'delete' | null;
 
 const nodeTypes = {
     topologyNode: TopologyNode,
@@ -271,6 +273,16 @@ const initialProject = (): TopologyProject => ({
         },
     ],
 });
+
+const blankProject = (): TopologyProject => ({
+    name: '新規プロジェクト',
+    description: null,
+    devices: [],
+    network_clouds: [],
+    links: [],
+});
+
+const projectSnapshot = (project: TopologyProject): string => JSON.stringify(project);
 
 const buildDeviceLabel = (device: TopologyDevice): string => {
     const lines = [device.name, buildDeviceCategory(device)];
@@ -765,11 +777,17 @@ export default function NetworkEditor() {
     const [isSaving, setIsSaving] = useState(false);
     const [isProjectListLoading, setIsProjectListLoading] = useState(false);
     const [isOpeningProject, setIsOpeningProject] = useState(false);
+    const [isDeletingProject, setIsDeletingProject] = useState(false);
     const [isReloading, setIsReloading] = useState(false);
     const [isSimulating, setIsSimulating] = useState(false);
     const [statusMessage, setStatusMessage] = useState('サンプルトポロジーは未保存です');
     const [savedProjects, setSavedProjects] = useState<SavedProjectSummary[]>([]);
     const [selectedSavedProjectId, setSelectedSavedProjectId] = useState<number | null>(null);
+    const [isProjectManagerOpen, setIsProjectManagerOpen] = useState(false);
+    const [pendingProjectAction, setPendingProjectAction] = useState<PendingProjectAction>(null);
+    const [lastPersistedSnapshot, setLastPersistedSnapshot] = useState<string>(
+        projectSnapshot(initialProject()),
+    );
     const [pendingLinkInterfaceId, setPendingLinkInterfaceId] = useState<string | null>(null);
     const [pendingLinkTargetNodeId, setPendingLinkTargetNodeId] = useState<string | null>(null);
     const [pendingLinkTargetInterfaceId, setPendingLinkTargetInterfaceId] = useState<string | null>(null);
@@ -870,6 +888,7 @@ export default function NetworkEditor() {
         (cloud) => cloud.id !== undefined,
     );
     const statusTone = statusToneForMessage(statusMessage);
+    const isDirty = projectSnapshot(project) !== lastPersistedSnapshot;
 
     useEffect(() => {
         const handleKeydown = (event: KeyboardEvent) => {
@@ -906,6 +925,7 @@ export default function NetworkEditor() {
     const applyLoadedProject = (loadedProject: TopologyProject, message: string) => {
         setProject(loadedProject);
         setProjectId(loadedProject.id ?? null);
+        setLastPersistedSnapshot(projectSnapshot(loadedProject));
         setSelectedSavedProjectId(loadedProject.id ?? null);
         setArpTable([]);
         setSelectedNodeId(
@@ -931,6 +951,7 @@ export default function NetworkEditor() {
         setContextMenu(null);
         resetLinkMode();
         setIsEditorOpen(false);
+        setPendingProjectAction(null);
         setStatusMessage(message);
     };
 
@@ -1215,7 +1236,27 @@ export default function NetworkEditor() {
     const removeRouteEntry = (routeEntries: RouteEntry[], index: number) =>
         routeEntries.filter((_, routeIndex) => routeIndex !== index);
 
-    const saveProject = async () => {
+    const startNewProject = () => {
+        const nextProject = blankProject();
+
+        setProjectId(null);
+        setProject(nextProject);
+        setLastPersistedSnapshot(projectSnapshot(nextProject));
+        setSelectedNodeId('');
+        setSelectedSavedProjectId(null);
+        setSelectedInterfaceId(null);
+        setIsEditorOpen(false);
+        setContextMenu(null);
+        setPingSourceDeviceId(null);
+        setPingDestinationId(null);
+        setSimulationResult(null);
+        setArpTable([]);
+        resetLinkMode();
+        setPendingProjectAction(null);
+        setStatusMessage('新規プロジェクトを作成しました');
+    };
+
+    const saveProject = async (): Promise<boolean> => {
         setIsSaving(true);
         setStatusMessage('トポロジーを保存しています...');
 
@@ -1238,7 +1279,7 @@ export default function NetworkEditor() {
 
             if (!response.ok) {
                 setStatusMessage(data.message ?? 'トポロジーの保存に失敗しました');
-                return;
+                return false;
             }
 
             applyLoadedProject(
@@ -1246,8 +1287,10 @@ export default function NetworkEditor() {
                 `プロジェクト #${data.project.id} を保存しました`,
             );
             void refreshSavedProjects(data.project.id);
+            return true;
         } catch {
             setStatusMessage('保存 API へ接続できませんでした');
+            return false;
         } finally {
             setIsSaving(false);
         }
@@ -1298,6 +1341,48 @@ export default function NetworkEditor() {
         );
     };
 
+    const deleteSelectedProject = async () => {
+        if (selectedSavedProjectId === null) {
+            setStatusMessage('削除するプロジェクトを選択してください');
+            return;
+        }
+
+        setIsDeletingProject(true);
+        setStatusMessage(`プロジェクト #${selectedSavedProjectId} を削除しています...`);
+
+        try {
+            const response = await fetch(`/api/network-projects/${selectedSavedProjectId}`, {
+                method: 'DELETE',
+                headers: {
+                    Accept: 'application/json',
+                },
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                setStatusMessage(data.message ?? 'プロジェクトの削除に失敗しました');
+                return;
+            }
+
+            const deletedProjectId = selectedSavedProjectId;
+
+            if (projectId === deletedProjectId) {
+                startNewProject();
+            }
+
+            await refreshSavedProjects(null);
+            setSelectedSavedProjectId((currentSelectedProjectId) =>
+                currentSelectedProjectId === deletedProjectId ? null : currentSelectedProjectId,
+            );
+            setPendingProjectAction(null);
+            setStatusMessage(`プロジェクト #${deletedProjectId} を削除しました`);
+        } catch {
+            setStatusMessage('削除 API へ接続できませんでした');
+        } finally {
+            setIsDeletingProject(false);
+        }
+    };
+
     const reloadProject = async () => {
         if (projectId === null) {
             setStatusMessage('再読込の前に一度保存してください');
@@ -1311,6 +1396,69 @@ export default function NetworkEditor() {
             `プロジェクト #${projectId} を再読込しました`,
             () => setIsReloading(false),
         );
+    };
+
+    const beginProjectAction = (action: Exclude<PendingProjectAction, null>) => {
+        if (isDirty) {
+            setPendingProjectAction(action);
+            return;
+        }
+
+        if (action === 'new') {
+            startNewProject();
+            return;
+        }
+
+        if (action === 'open') {
+            void openSelectedProject();
+            return;
+        }
+
+        void deleteSelectedProject();
+    };
+
+    const discardAndContinueProjectAction = () => {
+        const action = pendingProjectAction;
+        setPendingProjectAction(null);
+
+        if (action === 'new') {
+            startNewProject();
+            return;
+        }
+
+        if (action === 'open') {
+            void openSelectedProject();
+            return;
+        }
+
+        if (action === 'delete') {
+            void deleteSelectedProject();
+        }
+    };
+
+    const saveAndContinueProjectAction = async () => {
+        const action = pendingProjectAction;
+        const saved = await saveProject();
+
+        if (!saved) {
+            return;
+        }
+
+        setPendingProjectAction(null);
+
+        if (action === 'new') {
+            startNewProject();
+            return;
+        }
+
+        if (action === 'open') {
+            void openSelectedProject();
+            return;
+        }
+
+        if (action === 'delete') {
+            void deleteSelectedProject();
+        }
     };
 
     const addDevice = (
@@ -1745,32 +1893,18 @@ export default function NetworkEditor() {
                                 selectedType ? deviceTypeLabel(selectedType) : null
                             }
                             selectedLabel={selectedLabel}
+                            projectName={project.name}
+                            projectId={projectId}
+                            isDirty={isDirty}
                             statusTone={statusTone}
                             statusMessage={statusMessage}
-                            savedProjects={savedProjects}
-                            selectedSavedProjectId={selectedSavedProjectId}
                             isSaving={isSaving}
-                            isProjectListLoading={isProjectListLoading}
-                            isOpeningProject={isOpeningProject}
                             isReloading={isReloading}
-                            onSelectSavedProject={setSelectedSavedProjectId}
-                            onOpenSelectedProject={openSelectedProject}
-                            onSave={saveProject}
-                            onReload={reloadProject}
-                            onReset={() => {
-                                setProjectId(null);
-                                setProject(initialProject());
-                                setSelectedNodeId('device-router-1');
-                                setIsEditorOpen(false);
-                                setContextMenu(null);
-                                setPingSourceDeviceId(null);
-                                setPingDestinationId(null);
-                                setSimulationResult(null);
-                                setArpTable([]);
-                                resetLinkMode();
-                                setSelectedSavedProjectId(savedProjects[0]?.id ?? null);
-                                setStatusMessage('サンプルトポロジーに戻しました');
+                            onOpenProjectManager={() => setIsProjectManagerOpen(true)}
+                            onSave={() => {
+                                void saveProject();
                             }}
+                            onReload={reloadProject}
                         />
 
                         <div className="canvas-header">
@@ -1897,6 +2031,33 @@ export default function NetworkEditor() {
                         onDeleteNode={removeNode}
                     />
                 )}
+
+                <ProjectManagerModal
+                    isOpen={isProjectManagerOpen}
+                    savedProjects={savedProjects}
+                    selectedSavedProjectId={selectedSavedProjectId}
+                    currentProjectName={project.name}
+                    currentProjectId={projectId}
+                    isDirty={isDirty}
+                    isProjectListLoading={isProjectListLoading}
+                    isOpeningProject={isOpeningProject}
+                    isDeletingProject={isDeletingProject}
+                    pendingAction={pendingProjectAction}
+                    onClose={() => {
+                        if (pendingProjectAction === null) {
+                            setIsProjectManagerOpen(false);
+                        }
+                    }}
+                    onSelectSavedProject={setSelectedSavedProjectId}
+                    onCreateNewProject={() => beginProjectAction('new')}
+                    onOpenSelectedProject={() => beginProjectAction('open')}
+                    onDeleteSelectedProject={() => beginProjectAction('delete')}
+                    onDiscardAndContinue={discardAndContinueProjectAction}
+                    onSaveAndContinue={() => {
+                        void saveAndContinueProjectAction();
+                    }}
+                    onCancelPendingAction={() => setPendingProjectAction(null)}
+                />
 
                 {isEditorOpen && (selectedDevice || selectedCloud) && (
                     <div

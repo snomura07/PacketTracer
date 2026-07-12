@@ -304,6 +304,93 @@ body {
     opacity: 0.75;
 }
 
+.project-manager-modal {
+    width: min(760px, calc(100vw - 48px));
+}
+
+.project-manager-layout {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.25fr);
+    margin-bottom: 12px;
+}
+
+.project-manager-current {
+    display: grid;
+    gap: 12px;
+}
+
+.project-manager-current-card {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.project-manager-current-head {
+    display: grid;
+    gap: 4px;
+}
+
+.project-manager-current-head strong {
+    color: #0f172a;
+    font-size: 1.05rem;
+    line-height: 1.35;
+}
+
+.project-manager-current-status {
+    display: grid;
+    align-content: start;
+    gap: 10px;
+}
+
+.project-manager-current-actions {
+    display: flex;
+    justify-content: flex-start;
+    margin-top: 4px;
+}
+
+.project-manager-list {
+    display: grid;
+    gap: 8px;
+    max-height: 320px;
+    overflow: auto;
+}
+
+.project-manager-item {
+    display: grid;
+    gap: 4px;
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    border-radius: 14px;
+    background: rgba(248, 250, 252, 0.98);
+    color: #334155;
+    cursor: pointer;
+    font: inherit;
+    padding: 10px 12px;
+    text-align: left;
+}
+
+.project-manager-item strong {
+    color: #0f172a;
+}
+
+.project-manager-item span {
+    color: #64748b;
+    font-size: 0.82rem;
+}
+
+.project-manager-item.is-active {
+    border-color: rgba(251, 146, 60, 0.55);
+    background: rgba(255, 247, 237, 0.96);
+    box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.12);
+}
+
+.project-manager-guard {
+    display: grid;
+    gap: 10px;
+    border: 1px solid rgba(251, 146, 60, 0.3);
+    border-radius: 16px;
+    background: rgba(255, 247, 237, 0.72);
+    padding: 14px;
+}
+
 .palette-grid {
     display: grid;
     gap: 10px;
