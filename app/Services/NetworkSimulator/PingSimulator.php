@@ -717,17 +717,21 @@ class PingSimulator
 
     private function isSwitchport(Device $device, DeviceInterface $interface): bool
     {
-        if ($device->effectiveType() === Device::TYPE_L2_SWITCH) {
+        if (!$device->isSwitch()) {
+            return false;
+        }
+
+        if ($device->switchMode() === 'l2') {
             return true;
         }
 
-        return $device->effectiveType() === Device::TYPE_L3_SWITCH &&
-            ($interface->metadata_json['role'] ?? 'switchport') === 'switchport';
+        return ($interface->metadata_json['role'] ?? 'switchport') === 'switchport';
     }
 
     private function isSvi(Device $device, DeviceInterface $interface): bool
     {
-        return $device->effectiveType() === Device::TYPE_L3_SWITCH &&
+        return $device->isSwitch() &&
+            $device->switchMode() === 'l3' &&
             ($interface->metadata_json['role'] ?? null) === 'svi';
     }
 

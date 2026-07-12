@@ -22,8 +22,7 @@ class Device extends Model
 
     public const TYPES = [
         self::TYPE_PC,
-        self::TYPE_L2_SWITCH,
-        self::TYPE_L3_SWITCH,
+        self::TYPE_SWITCH,
         self::TYPE_ONU,
         self::TYPE_AP,
         self::TYPE_ROUTER,
@@ -42,13 +41,13 @@ class Device extends Model
     ];
 
     public const LAYER2_BRIDGE_TYPES = [
-        self::TYPE_L2_SWITCH,
+        self::TYPE_SWITCH,
         self::TYPE_ONU,
         self::TYPE_AP,
     ];
 
     public const ROUTING_TYPES = [
-        self::TYPE_L3_SWITCH,
+        self::TYPE_SWITCH,
         self::TYPE_ROUTER,
         self::TYPE_FIREWALL,
     ];
@@ -84,12 +83,39 @@ class Device extends Model
 
     public function effectiveType(): string
     {
-        if ($this->type !== self::TYPE_SWITCH) {
+        if (!$this->isSwitch()) {
             return $this->type;
         }
 
-        return ($this->metadata_json['switch_mode'] ?? 'l2') === 'l3'
+        return $this->switchMode() === 'l3'
             ? self::TYPE_L3_SWITCH
             : self::TYPE_L2_SWITCH;
+    }
+
+    public function topologyType(): string
+    {
+        return $this->isSwitch() ? self::TYPE_SWITCH : $this->type;
+    }
+
+    public function isSwitch(): bool
+    {
+        return in_array($this->type, [
+            self::TYPE_SWITCH,
+            self::TYPE_L2_SWITCH,
+            self::TYPE_L3_SWITCH,
+        ], true);
+    }
+
+    public function switchMode(): string
+    {
+        if ($this->type === self::TYPE_L3_SWITCH) {
+            return 'l3';
+        }
+
+        if ($this->type === self::TYPE_L2_SWITCH) {
+            return 'l2';
+        }
+
+        return ($this->metadata_json['switch_mode'] ?? 'l2') === 'l3' ? 'l3' : 'l2';
     }
 }

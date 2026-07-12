@@ -23,6 +23,7 @@ import type {
     RouteEntry,
     SavedProjectSummary,
     SimulationResult,
+    SwitchMode,
     TopologyCloud,
     TopologyDevice,
     TopologyProject,
@@ -93,7 +94,7 @@ const initialProject = (): TopologyProject => ({
         {
             client_id: 'device-switch-1',
             name: 'SW-1',
-            type: 'l2_switch',
+            type: 'switch',
             position_x: 240,
             position_y: 160,
             default_gateway: null,
@@ -272,7 +273,7 @@ const initialProject = (): TopologyProject => ({
 });
 
 const buildDeviceLabel = (device: TopologyDevice): string => {
-    const lines = [device.name, device.type.toUpperCase()];
+    const lines = [device.name, buildDeviceCategory(device)];
 
     for (const iface of device.interfaces) {
         const interfaceRole = String(iface.metadata_json?.role ?? '');
@@ -285,7 +286,9 @@ const buildDeviceLabel = (device: TopologyDevice): string => {
         lines.push(
             iface.ip_address && iface.subnet_mask
                 ? `${iface.name}${roleSuffix} ${iface.ip_address}/${iface.subnet_mask}`
-                : `${iface.name}${roleSuffix} unnumbered`,
+                : interfaceSupportsLayer3Addressing(device, iface)
+                    ? `${iface.name}${roleSuffix} unnumbered`
+                    : `${iface.name}${roleSuffix}`,
         );
     }
 
@@ -308,11 +311,91 @@ const buildDeviceLabel = (device: TopologyDevice): string => {
     return lines.join('\n');
 };
 
-const isL2Switch = (device: TopologyDevice): boolean => device.type === 'l2_switch';
+const switchModeOf = (device: TopologyDevice): SwitchMode =>
+    device.metadata_json?.switch_mode === 'l3' ? 'l3' : 'l2';
 
-const isL3Switch = (device: TopologyDevice): boolean => device.type === 'l3_switch';
+const isSwitch = (device: TopologyDevice): boolean => device.type === 'switch';
 
-const isSwitch = (device: TopologyDevice): boolean => isL2Switch(device) || isL3Switch(device);
+const isL3Switch = (device: TopologyDevice): boolean =>
+    isSwitch(device) && switchModeOf(device) === 'l3';
+
+const interfaceSupportsLayer3Addressing = (
+    device: TopologyDevice,
+    iface: TopologyDevice['interfaces'][number],
+): boolean => {
+    if (!isSwitch(device)) {
+        return true;
+    }
+
+    const role = interfaceRoleForDevice(device, iface);
+
+    return isL3Switch(device) && (role === 'svi' || role === 'routed');
+};
+
+const interfaceRoleLabel = (
+    device: TopologyDevice,
+    iface: TopologyDevice['interfaces'][number],
+): string => {
+    const role = interfaceRoleForDevice(device, iface);
+
+    switch (role) {
+        case 'switchport':
+            return isL3Switch(device) ? 'VLAN ポート' : 'L2 VLAN ポート';
+        case 'svi':
+            return 'SVI (VLAN インターフェース)';
+        case 'routed':
+            return 'Routed ポート';
+        case 'host':
+            return 'ホストNIC';
+        default:
+            return role;
+    }
+};
+
+const routeCapableInterfaces = (device: TopologyDevice): TopologyDevice['interfaces'] =>
+    device.interfaces.filter(
+        (iface) =>
+            interfaceSupportsLayer3Addressing(device, iface) &&
+            iface.ip_address !== null &&
+            iface.subnet_mask !== null,
+    );
+
+const isSviInterface = (
+    device: TopologyDevice,
+    iface: TopologyDevice['interfaces'][number],
+): boolean => interfaceRoleForDevice(device, iface) === 'svi';
+
+const physicalInterfaces = (device: TopologyDevice): TopologyDevice['interfaces'] =>
+    device.interfaces.filter((iface) => !isSviInterface(device, iface));
+
+const sviInterfaces = (device: TopologyDevice): TopologyDevice['interfaces'] =>
+    device.interfaces.filter((iface) => isSviInterface(device, iface));
+
+const nextAvailableSviVlanId = (device: TopologyDevice): number => {
+    const used = new Set(
+        sviInterfaces(device).map((iface) => Number(iface.metadata_json?.vlan_id ?? 1)),
+    );
+
+    let candidate = 1;
+    while (used.has(candidate)) {
+        candidate += 1;
+    }
+
+    return candidate;
+};
+
+const sviForSwitchport = (
+    device: TopologyDevice,
+    iface: TopologyDevice['interfaces'][number],
+): TopologyDevice['interfaces'][number] | null => {
+    const accessVlan = Number(iface.metadata_json?.access_vlan ?? 0);
+
+    return (
+        sviInterfaces(device).find(
+            (svi) => Number(svi.metadata_json?.vlan_id ?? 0) === accessVlan,
+        ) ?? null
+    );
+};
 
 const supportsStaticRouting = (device: TopologyDevice): boolean =>
     isL3Switch(device) || device.type === 'router' || device.type === 'firewall';
@@ -373,12 +456,12 @@ const interfaceRoleForDevice = (
     device: TopologyDevice,
     iface: TopologyDevice['interfaces'][number],
 ): 'switchport' | 'svi' | 'routed' | 'host' =>
-    device.type === 'l2_switch'
-        ? 'switchport'
-        : device.type === 'l3_switch'
+    isSwitch(device)
+        ? switchModeOf(device) === 'l3'
           ? ((iface.metadata_json?.role as 'switchport' | 'svi' | 'routed' | undefined) ??
               'switchport')
-          : device.type === 'onu' || device.type === 'ap'
+          : 'switchport'
+        : device.type === 'onu' || device.type === 'ap'
             ? 'switchport'
           : device.type === 'pc'
             ? 'host'
@@ -388,10 +471,8 @@ const deviceTypeLabel = (type: DeviceType | NetworkCloudType): string => {
     switch (type) {
         case 'pc':
             return 'PC';
-        case 'l2_switch':
-            return 'L2 スイッチ';
-        case 'l3_switch':
-            return 'L3 スイッチ';
+        case 'switch':
+            return 'スイッチ';
         case 'onu':
             return 'ONU';
         case 'ap':
@@ -411,7 +492,12 @@ const deviceTypeLabel = (type: DeviceType | NetworkCloudType): string => {
     }
 };
 
-const buildDeviceCategory = (device: TopologyDevice): string => deviceTypeLabel(device.type);
+const buildDeviceCategory = (device: TopologyDevice): string =>
+    isSwitch(device)
+        ? switchModeOf(device) === 'l3'
+            ? 'L3 スイッチ'
+            : 'L2 スイッチ'
+        : deviceTypeLabel(device.type);
 
 const apSsidProfiles = (device: TopologyDevice): Array<{
     name: string;
@@ -516,6 +602,7 @@ const buildEdges = (project: TopologyProject): Edge[] => {
 const createDeviceTemplate = (
     type: DeviceType,
     position: { x: number; y: number },
+    switchMode: SwitchMode = 'l2',
 ): TopologyDevice => {
     const deviceId = nextClientId(`device-${type}`);
 
@@ -570,7 +657,7 @@ const createDeviceTemplate = (
                         },
                     },
                 ]
-            : type === 'l2_switch' || type === 'l3_switch'
+            : type === 'switch'
               ? createSwitchInterfaces(deviceId, 8)
               : [
                     {
@@ -593,18 +680,16 @@ const createDeviceTemplate = (
 
     return {
         client_id: deviceId,
-        name: `${type.toUpperCase()}-${deviceId.slice(-4)}`,
+        name: type === 'switch' ? `SW-${deviceId.slice(-4)}` : `${type.toUpperCase()}-${deviceId.slice(-4)}`,
         type,
         position_x: position.x,
         position_y: position.y,
         default_gateway: null,
         metadata_json:
-            type === 'l2_switch'
-                ? { switch_mode: 'l2', port_count: 8 }
-                : type === 'l3_switch'
-                  ? { switch_mode: 'l3', port_count: 8 }
-                  : type === 'ap'
-                    ? {
+            type === 'switch'
+                ? { switch_mode: switchMode, port_count: 8 }
+                : type === 'ap'
+                  ? {
                           ssid_profiles: [
                               {
                                   name: 'CorpWiFi',
@@ -1021,13 +1106,15 @@ export default function NetworkEditor() {
             );
 
             if (targetDevice) {
-                if (targetDevice.interfaces.length === 0) {
+                const linkableInterfaces = physicalInterfaces(targetDevice);
+
+                if (linkableInterfaces.length === 0) {
                     setStatusMessage('接続先デバイスに利用可能なインターフェースがありません');
                     return;
                 }
 
                 setPendingLinkTargetNodeId(targetDevice.client_id);
-                setPendingLinkTargetInterfaceId(targetDevice.interfaces[0]?.client_id ?? null);
+                setPendingLinkTargetInterfaceId(linkableInterfaces[0]?.client_id ?? null);
                 setSelectedNodeId(nodeId);
                 setIsEditorOpen(true);
                 setStatusMessage(`${targetDevice.name} の接続先インターフェースを選択してください`);
@@ -1124,6 +1211,9 @@ export default function NetworkEditor() {
                   }
                 : routeEntry,
         );
+
+    const removeRouteEntry = (routeEntries: RouteEntry[], index: number) =>
+        routeEntries.filter((_, routeIndex) => routeIndex !== index);
 
     const saveProject = async () => {
         setIsSaving(true);
@@ -1223,8 +1313,12 @@ export default function NetworkEditor() {
         );
     };
 
-    const addDevice = (type: DeviceType, position: FlowPosition = nextDevicePosition) => {
-        const device = createDeviceTemplate(type, position);
+    const addDevice = (
+        type: DeviceType,
+        position: FlowPosition = nextDevicePosition,
+        switchMode: SwitchMode = 'l2',
+    ) => {
+        const device = createDeviceTemplate(type, position, switchMode);
 
         setProject((currentProject) => ({
             ...currentProject,
@@ -1311,13 +1405,46 @@ export default function NetworkEditor() {
         setPendingLinkTargetInterfaceId(null);
     };
 
+    const addSviToSelectedDevice = () => {
+        if (!selectedDevice || !isL3Switch(selectedDevice)) {
+            return;
+        }
+
+        const vlanId = nextAvailableSviVlanId(selectedDevice);
+        const sviClientId = nextClientId(`${selectedDevice.client_id}-svi${vlanId}`);
+
+        updateSelectedDevice((device) => ({
+            ...device,
+            interfaces: [
+                ...device.interfaces,
+                {
+                    client_id: sviClientId,
+                    name: `vlan${vlanId}`,
+                    ip_address: null,
+                    subnet_mask: null,
+                    mac_address: nextMacAddress(),
+                    metadata_json: {
+                        role: 'svi',
+                        vlan_id: vlanId,
+                    },
+                },
+            ],
+        }));
+        setSelectedInterfaceId(sviClientId);
+        setStatusMessage(`SVI vlan${vlanId} を追加しました`);
+    };
+
     const removeSelectedInterface = () => {
-        if (
-            !selectedDevice ||
-            !selectedInterface ||
-            selectedDevice.type !== 'pc' ||
-            selectedDevice.interfaces.length <= 1
-        ) {
+        if (!selectedDevice || !selectedInterface) {
+            return;
+        }
+
+        const isPcInterface =
+            selectedDevice.type === 'pc' && selectedDevice.interfaces.length > 1;
+        const isRemovableSvi =
+            isL3Switch(selectedDevice) && isSviInterface(selectedDevice, selectedInterface);
+
+        if (!isPcInterface && !isRemovableSvi) {
             return;
         }
 
@@ -1744,8 +1871,7 @@ export default function NetworkEditor() {
                         }}
                         onAddInterface={() => {
                             updateSelectedDevice((device) =>
-                                device.type === 'l2_switch' ||
-                                device.type === 'l3_switch'
+                                isSwitch(device)
                                     ? resizeSwitchInterfaces(
                                           device,
                                           switchPortCount(device) + 1,
@@ -1822,7 +1948,7 @@ export default function NetworkEditor() {
                                                 )
                                             }
                                         >
-                                            {pendingTargetDevice.interfaces.map((iface) => (
+                                            {physicalInterfaces(pendingTargetDevice).map((iface) => (
                                                 <option key={iface.client_id} value={iface.client_id}>
                                                     {iface.name}
                                                 </option>
@@ -1953,8 +2079,50 @@ export default function NetworkEditor() {
                                                 </label>
                                             )}
 
-                                            {(selectedDevice.type === 'l2_switch' ||
-                                                selectedDevice.type === 'l3_switch') && (
+                                            {isSwitch(selectedDevice) && (
+                                                <label className="field-group">
+                                                    <span>スイッチモード</span>
+                                                    <select
+                                                        className="editor-input"
+                                                        value={switchModeOf(selectedDevice)}
+                                                        onChange={(event) =>
+                                                            updateSelectedDevice((device) => ({
+                                                                ...device,
+                                                                metadata_json: {
+                                                                    ...device.metadata_json,
+                                                                    switch_mode:
+                                                                        event.target.value === 'l3'
+                                                                            ? 'l3'
+                                                                            : 'l2',
+                                                                },
+                                                                interfaces: device.interfaces.map(
+                                                                    (deviceInterface) =>
+                                                                        event.target.value === 'l3'
+                                                                            ? deviceInterface
+                                                                            : {
+                                                                                  ...deviceInterface,
+                                                                                  ip_address: null,
+                                                                                  subnet_mask: null,
+                                                                                  metadata_json: {
+                                                                                      role: 'switchport',
+                                                                                      access_vlan: Number(
+                                                                                          deviceInterface.metadata_json?.access_vlan ??
+                                                                                              deviceInterface.metadata_json?.vlan_id ??
+                                                                                              1,
+                                                                                      ),
+                                                                                  },
+                                                                              },
+                                                                ),
+                                                            }))
+                                                        }
+                                                    >
+                                                        <option value="l2">L2</option>
+                                                        <option value="l3">L3</option>
+                                                    </select>
+                                                </label>
+                                            )}
+
+                                            {isSwitch(selectedDevice) && (
                                                 <label className="field-group">
                                                     <span>ポート数</span>
                                                     <select
@@ -2099,9 +2267,13 @@ export default function NetworkEditor() {
 
                                     {selectedEditorTab === 'interfaces' && (
                                         <div className="interface-editor-layout">
-                                            <div className="detail-section">
+                                            <div className="detail-section interface-pane">
                                                 <div className="detail-heading-row">
-                                                    <span className="detail-heading">インターフェース</span>
+                                                    <span className="detail-heading">
+                                                        {isL3Switch(selectedDevice)
+                                                            ? '物理ポート / SVI'
+                                                            : 'インターフェース'}
+                                                    </span>
                                                     <div className="inline-link-row">
                                                         {!isSwitch(selectedDevice) && (
                                                             <button
@@ -2140,42 +2312,127 @@ export default function NetworkEditor() {
                                                             )}
                                                     </div>
                                                 </div>
-                                                <div className="interface-list">
-                                                    {selectedDevice.interfaces.map((iface) => {
-                                                        const interfaceRole = interfaceRoleForDevice(
-                                                            selectedDevice,
-                                                            iface,
-                                                        );
-                                                        const linkStatus =
-                                                            interfaceRole === 'svi'
-                                                                ? '論理インターフェース'
-                                                                : project.links.some(
-                                                                      (link) =>
-                                                                          link.interface_a_client_id === iface.client_id ||
-                                                                          link.interface_b_client_id === iface.client_id,
-                                                                  )
-                                                                  ? '接続中'
-                                                                  : '未使用';
-                                                        const statusClass =
-                                                            interfaceRole === 'svi'
-                                                                ? 'is-logical'
-                                                                : linkStatus === '接続中'
-                                                                  ? 'is-connected'
-                                                                  : 'is-unused';
+                                                {!isL3Switch(selectedDevice) && (
+                                                    <div className="interface-list">
+                                                        {selectedDevice.interfaces.map((iface) => {
+                                                            const interfaceRole = interfaceRoleForDevice(
+                                                                selectedDevice,
+                                                                iface,
+                                                            );
+                                                            const linkStatus =
+                                                                interfaceRole === 'svi'
+                                                                    ? '論理インターフェース'
+                                                                    : project.links.some(
+                                                                          (link) =>
+                                                                              link.interface_a_client_id === iface.client_id ||
+                                                                              link.interface_b_client_id === iface.client_id,
+                                                                      )
+                                                                      ? '接続中'
+                                                                      : '未使用';
+                                                            const statusClass =
+                                                                interfaceRole === 'svi'
+                                                                    ? 'is-logical'
+                                                                    : linkStatus === '接続中'
+                                                                      ? 'is-connected'
+                                                                      : 'is-unused';
 
-                                                        return (
-                                                            <button
-                                                                key={iface.client_id}
-                                                                type="button"
-                                                                className={`interface-list-item ${statusClass} ${selectedInterface?.client_id === iface.client_id ? 'is-active' : ''}`}
-                                                                onClick={() => setSelectedInterfaceId(iface.client_id)}
-                                                            >
-                                                                <strong>{iface.name}</strong>
-                                                                <span>{linkStatus}</span>
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
+                                                            return (
+                                                                <button
+                                                                    key={iface.client_id}
+                                                                    type="button"
+                                                                    className={`interface-list-item ${statusClass} ${selectedInterface?.client_id === iface.client_id ? 'is-active' : ''}`}
+                                                                    onClick={() => setSelectedInterfaceId(iface.client_id)}
+                                                                >
+                                                                    <strong>{iface.name}</strong>
+                                                                    <span>{linkStatus}</span>
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                                {isL3Switch(selectedDevice) && (
+                                                    <div className="interface-list-sections">
+                                                        <div className="interface-list-section">
+                                                            <span className="detail-heading">物理ポート</span>
+                                                            <div className="interface-list interface-list-scroll">
+                                                                {physicalInterfaces(selectedDevice).map((iface) => {
+                                                                    const linkStatus = project.links.some(
+                                                                        (link) =>
+                                                                            link.interface_a_client_id === iface.client_id ||
+                                                                            link.interface_b_client_id === iface.client_id,
+                                                                    )
+                                                                        ? '接続中'
+                                                                        : '未使用';
+                                                                    const statusClass =
+                                                                        linkStatus === '接続中'
+                                                                            ? 'is-connected'
+                                                                            : 'is-unused';
+
+                                                                    return (
+                                                                        <button
+                                                                            key={iface.client_id}
+                                                                            type="button"
+                                                                            className={`interface-list-item ${statusClass} ${selectedInterface?.client_id === iface.client_id ? 'is-active' : ''}`}
+                                                                            onClick={() => setSelectedInterfaceId(iface.client_id)}
+                                                                        >
+                                                                            <strong>{iface.name}</strong>
+                                                                            <span>{interfaceRoleLabel(selectedDevice, iface)}</span>
+                                                                        </button>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                        <div className="interface-list-section">
+                                                            <div className="detail-heading-row">
+                                                                <span className="detail-heading">SVI</span>
+                                                                <div className="modal-inline-actions">
+                                                                    <button
+                                                                        type="button"
+                                                                        className="mini-button"
+                                                                        onClick={addSviToSelectedDevice}
+                                                                    >
+                                                                        SVI を追加
+                                                                    </button>
+                                                                    {selectedInterface &&
+                                                                        isSviInterface(
+                                                                            selectedDevice,
+                                                                            selectedInterface,
+                                                                        ) && (
+                                                                            <button
+                                                                                type="button"
+                                                                                className="mini-button"
+                                                                                onClick={removeSelectedInterface}
+                                                                            >
+                                                                                この SVI を削除
+                                                                            </button>
+                                                                        )}
+                                                                </div>
+                                                            </div>
+                                                            <div className="interface-list interface-list-scroll">
+                                                                {sviInterfaces(selectedDevice).length === 0 && (
+                                                                    <div className="detail-card">
+                                                                        <span className="selected-summary-text">
+                                                                            SVI はまだありません。
+                                                                        </span>
+                                                                    </div>
+                                                                )}
+                                                                {sviInterfaces(selectedDevice).map((iface) => (
+                                                                    <button
+                                                                        key={iface.client_id}
+                                                                        type="button"
+                                                                        className={`interface-list-item is-logical ${selectedInterface?.client_id === iface.client_id ? 'is-active' : ''}`}
+                                                                        onClick={() => setSelectedInterfaceId(iface.client_id)}
+                                                                    >
+                                                                        <strong>{iface.name}</strong>
+                                                                        <span>
+                                                                            VLAN {String(iface.metadata_json?.vlan_id ?? 1)}
+                                                                        </span>
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
 
                                             {selectedInterface && (
@@ -2196,7 +2453,7 @@ export default function NetworkEditor() {
                                                                 <div className="inline-link-row">
                                                                     <span>{iface.name}</span>
                                                                     <span className="hop-meta">
-                                                                        {interfaceRole}
+                                                                        {interfaceRoleLabel(selectedDevice, iface)}
                                                                     </span>
                                                                 </div>
                                                                 <div className="modal-form-grid">
@@ -2221,14 +2478,18 @@ export default function NetworkEditor() {
                                                                             }
                                                                         />
                                                                     </label>
-                                                                    {(selectedDevice.type === 'l2_switch' ||
-                                                                        selectedDevice.type === 'l3_switch') && (
+                                                                    {isSwitch(selectedDevice) &&
+                                                                        (!isL3Switch(selectedDevice) ||
+                                                                            !isSviInterface(
+                                                                                selectedDevice,
+                                                                                iface,
+                                                                            )) && (
                                                                         <label className="field-group">
                                                                             <span>インターフェース種別</span>
                                                                             <select
                                                                                 className="editor-input"
                                                                                 value={interfaceRole}
-                                                                                disabled={selectedDevice.type === 'l2_switch'}
+                                                                                disabled={!isL3Switch(selectedDevice)}
                                                                                 onChange={(event) =>
                                                                                     updateSelectedDevice((device) => ({
                                                                                         ...device,
@@ -2237,17 +2498,16 @@ export default function NetworkEditor() {
                                                                                                 interfaceIndex === index
                                                                                                     ? {
                                                                                                           ...deviceInterface,
+                                                                                                          ip_address:
+                                                                                                              event.target.value === 'switchport'
+                                                                                                                  ? null
+                                                                                                                  : deviceInterface.ip_address,
+                                                                                                          subnet_mask:
+                                                                                                              event.target.value === 'switchport'
+                                                                                                                  ? null
+                                                                                                                  : deviceInterface.subnet_mask,
                                                                                                           metadata_json:
-                                                                                                              event.target.value === 'svi'
-                                                                                                                  ? {
-                                                                                                                        role: 'svi',
-                                                                                                                        vlan_id: Number(
-                                                                                                                            deviceInterface.metadata_json?.access_vlan ??
-                                                                                                                                deviceInterface.metadata_json?.vlan_id ??
-                                                                                                                                1,
-                                                                                                                        ),
-                                                                                                                    }
-                                                                                                                  : event.target.value === 'routed'
+                                                                                                              event.target.value === 'routed'
                                                                                                                     ? { role: 'routed' }
                                                                                                                     : {
                                                                                                                           role: 'switchport',
@@ -2264,53 +2524,12 @@ export default function NetworkEditor() {
                                                                                 }
                                                                             >
                                                                                 <option value="switchport">Switchport</option>
-                                                                                <option value="svi">SVI</option>
-                                                                                <option value="routed">Routed</option>
+                                                                                {isL3Switch(selectedDevice) && (
+                                                                                    <option value="routed">Routed</option>
+                                                                                )}
                                                                             </select>
                                                                         </label>
                                                                     )}
-                                                                    <label className="field-group">
-                                                                        <span>IP アドレス</span>
-                                                                        <input
-                                                                            className="editor-input"
-                                                                            value={iface.ip_address ?? ''}
-                                                                            onChange={(event) =>
-                                                                                updateSelectedDevice((device) => ({
-                                                                                    ...device,
-                                                                                    interfaces: device.interfaces.map(
-                                                                                        (deviceInterface, interfaceIndex) =>
-                                                                                            interfaceIndex === index
-                                                                                                ? {
-                                                                                                      ...deviceInterface,
-                                                                                                      ip_address: event.target.value || null,
-                                                                                                  }
-                                                                                                : deviceInterface,
-                                                                                    ),
-                                                                                }))
-                                                                            }
-                                                                        />
-                                                                    </label>
-                                                                    <label className="field-group">
-                                                                        <span>サブネットマスク</span>
-                                                                        <input
-                                                                            className="editor-input"
-                                                                            value={iface.subnet_mask ?? ''}
-                                                                            onChange={(event) =>
-                                                                                updateSelectedDevice((device) => ({
-                                                                                    ...device,
-                                                                                    interfaces: device.interfaces.map(
-                                                                                        (deviceInterface, interfaceIndex) =>
-                                                                                            interfaceIndex === index
-                                                                                                ? {
-                                                                                                      ...deviceInterface,
-                                                                                                      subnet_mask: event.target.value || null,
-                                                                                                  }
-                                                                                                : deviceInterface,
-                                                                                    ),
-                                                                                }))
-                                                                            }
-                                                                        />
-                                                                    </label>
                                                                     <label className="field-group">
                                                                         <span>MAC アドレス</span>
                                                                         <div className="inline-link-row">
@@ -2354,12 +2573,74 @@ export default function NetworkEditor() {
                                                                             </button>
                                                                         </div>
                                                                     </label>
-                                                                    {(interfaceRole === 'switchport' || interfaceRole === 'svi') && (
+
+                                                                    {!isSwitch(selectedDevice) && (
+                                                                        <>
+                                                                            <label className="field-group">
+                                                                                <span>IP アドレス</span>
+                                                                                <input
+                                                                                    className="editor-input"
+                                                                                    value={iface.ip_address ?? ''}
+                                                                                    onChange={(event) =>
+                                                                                        updateSelectedDevice((device) => ({
+                                                                                            ...device,
+                                                                                            interfaces: device.interfaces.map(
+                                                                                                (
+                                                                                                    deviceInterface,
+                                                                                                    interfaceIndex,
+                                                                                                ) =>
+                                                                                                    interfaceIndex ===
+                                                                                                    index
+                                                                                                        ? {
+                                                                                                              ...deviceInterface,
+                                                                                                              ip_address:
+                                                                                                                  event.target.value ||
+                                                                                                                  null,
+                                                                                                          }
+                                                                                                        : deviceInterface,
+                                                                                            ),
+                                                                                        }))
+                                                                                    }
+                                                                                />
+                                                                            </label>
+                                                                            <label className="field-group">
+                                                                                <span>サブネットマスク</span>
+                                                                                <input
+                                                                                    className="editor-input"
+                                                                                    value={iface.subnet_mask ?? ''}
+                                                                                    onChange={(event) =>
+                                                                                        updateSelectedDevice((device) => ({
+                                                                                            ...device,
+                                                                                            interfaces: device.interfaces.map(
+                                                                                                (
+                                                                                                    deviceInterface,
+                                                                                                    interfaceIndex,
+                                                                                                ) =>
+                                                                                                    interfaceIndex ===
+                                                                                                    index
+                                                                                                        ? {
+                                                                                                              ...deviceInterface,
+                                                                                                              subnet_mask:
+                                                                                                                  event.target.value ||
+                                                                                                                  null,
+                                                                                                          }
+                                                                                                        : deviceInterface,
+                                                                                            ),
+                                                                                        }))
+                                                                                    }
+                                                                                />
+                                                                            </label>
+                                                                        </>
+                                                                    )}
+
+                                                                    {isSwitch(selectedDevice) && !isL3Switch(selectedDevice) && (
                                                                         <label className="field-group">
-                                                                            <span>{interfaceRole === 'svi' ? 'SVI VLAN' : 'Access VLAN'}</span>
+                                                                            <span>所属 VLAN</span>
                                                                             <input
                                                                                 className="editor-input"
-                                                                                value={String(interfaceRole === 'svi' ? iface.metadata_json?.vlan_id ?? 1 : iface.metadata_json?.access_vlan ?? 1)}
+                                                                                inputMode="numeric"
+                                                                                placeholder="1"
+                                                                                value={String(iface.metadata_json?.access_vlan ?? '')}
                                                                                 onChange={(event) =>
                                                                                     updateSelectedDevice((device) => ({
                                                                                         ...device,
@@ -2368,18 +2649,14 @@ export default function NetworkEditor() {
                                                                                                 interfaceIndex === index
                                                                                                     ? {
                                                                                                           ...deviceInterface,
-                                                                                                          metadata_json:
-                                                                                                              interfaceRole === 'svi'
-                                                                                                                  ? {
-                                                                                                                        ...deviceInterface.metadata_json,
-                                                                                                                        role: 'svi',
-                                                                                                                        vlan_id: Number(event.target.value || 1),
-                                                                                                                    }
-                                                                                                                  : {
-                                                                                                                        ...deviceInterface.metadata_json,
-                                                                                                                        role: 'switchport',
-                                                                                                                        access_vlan: Number(event.target.value || 1),
-                                                                                                                    },
+                                                                                                          metadata_json: {
+                                                                                                              ...deviceInterface.metadata_json,
+                                                                                                              role: 'switchport',
+                                                                                                              access_vlan:
+                                                                                                                  event.target.value === ''
+                                                                                                                      ? ''
+                                                                                                                      : Number(event.target.value),
+                                                                                                          },
                                                                                                       }
                                                                                                     : deviceInterface,
                                                                                         ),
@@ -2387,6 +2664,195 @@ export default function NetworkEditor() {
                                                                                 }
                                                                             />
                                                                         </label>
+                                                                    )}
+
+                                                                    {isL3Switch(selectedDevice) && interfaceRole === 'switchport' && (
+                                                                        <>
+                                                                            <label className="field-group">
+                                                                                <span>接続先 SVI</span>
+                                                                                <select
+                                                                                    className="editor-input"
+                                                                                    value={sviForSwitchport(selectedDevice, iface)?.client_id ?? ''}
+                                                                                    onChange={(event) =>
+                                                                                        updateSelectedDevice((device) => {
+                                                                                            const selectedSvi = sviInterfaces(device).find(
+                                                                                                (candidate) =>
+                                                                                                    candidate.client_id === event.target.value,
+                                                                                            );
+
+                                                                                            return {
+                                                                                                ...device,
+                                                                                                interfaces: device.interfaces.map(
+                                                                                                    (
+                                                                                                        deviceInterface,
+                                                                                                        interfaceIndex,
+                                                                                                    ) =>
+                                                                                                        interfaceIndex === index
+                                                                                                            ? {
+                                                                                                                  ...deviceInterface,
+                                                                                                                  metadata_json: {
+                                                                                                                      ...deviceInterface.metadata_json,
+                                                                                                                      role: 'switchport',
+                                                                                                                      access_vlan:
+                                                                                                                          selectedSvi
+                                                                                                                              ? Number(
+                                                                                                                                    selectedSvi
+                                                                                                                                        .metadata_json
+                                                                                                                                        ?.vlan_id ?? 1,
+                                                                                                                                )
+                                                                                                                              : '',
+                                                                                                                  },
+                                                                                                              }
+                                                                                                            : deviceInterface,
+                                                                                                ),
+                                                                                            };
+                                                                                        })
+                                                                                    }
+                                                                                >
+                                                                                    <option value="">SVI を選択</option>
+                                                                                    {sviInterfaces(selectedDevice).map((svi) => (
+                                                                                        <option
+                                                                                            key={svi.client_id}
+                                                                                            value={svi.client_id}
+                                                                                        >
+                                                                                            {svi.name} (VLAN {String(svi.metadata_json?.vlan_id ?? 1)})
+                                                                                        </option>
+                                                                                    ))}
+                                                                                </select>
+                                                                            </label>
+                                                                            <label className="field-group">
+                                                                                <span>所属 VLAN</span>
+                                                                                <input
+                                                                                    className="editor-input"
+                                                                                    value={String(iface.metadata_json?.access_vlan ?? '')}
+                                                                                    readOnly
+                                                                                />
+                                                                            </label>
+                                                                        </>
+                                                                    )}
+
+                                                                    {isL3Switch(selectedDevice) && interfaceRole === 'svi' && (
+                                                                        <>
+                                                                            <label className="field-group">
+                                                                                <span>対象 VLAN</span>
+                                                                                <input
+                                                                                    className="editor-input"
+                                                                                    inputMode="numeric"
+                                                                                    placeholder="1"
+                                                                                    value={String(iface.metadata_json?.vlan_id ?? '')}
+                                                                                    onChange={(event) =>
+                                                                                        updateSelectedDevice((device) => ({
+                                                                                            ...device,
+                                                                                            interfaces: device.interfaces.map(
+                                                                                                (deviceInterface, interfaceIndex) =>
+                                                                                                    interfaceIndex === index
+                                                                                                        ? {
+                                                                                                              ...deviceInterface,
+                                                                                                              metadata_json: {
+                                                                                                                  ...deviceInterface.metadata_json,
+                                                                                                                  role: 'svi',
+                                                                                                                  vlan_id:
+                                                                                                                      event.target.value === ''
+                                                                                                                          ? ''
+                                                                                                                          : Number(event.target.value),
+                                                                                                              },
+                                                                                                          }
+                                                                                                        : deviceInterface,
+                                                                                            ),
+                                                                                        }))
+                                                                                    }
+                                                                                />
+                                                                            </label>
+                                                                            <label className="field-group">
+                                                                                <span>SVI の IP アドレス</span>
+                                                                                <input
+                                                                                    className="editor-input"
+                                                                                    value={iface.ip_address ?? ''}
+                                                                                    onChange={(event) =>
+                                                                                        updateSelectedDevice((device) => ({
+                                                                                            ...device,
+                                                                                            interfaces: device.interfaces.map(
+                                                                                                (deviceInterface, interfaceIndex) =>
+                                                                                                    interfaceIndex === index
+                                                                                                        ? {
+                                                                                                              ...deviceInterface,
+                                                                                                              ip_address: event.target.value || null,
+                                                                                                          }
+                                                                                                        : deviceInterface,
+                                                                                            ),
+                                                                                        }))
+                                                                                    }
+                                                                                />
+                                                                            </label>
+                                                                            <label className="field-group">
+                                                                                <span>SVI のサブネットマスク</span>
+                                                                                <input
+                                                                                    className="editor-input"
+                                                                                    value={iface.subnet_mask ?? ''}
+                                                                                    onChange={(event) =>
+                                                                                        updateSelectedDevice((device) => ({
+                                                                                            ...device,
+                                                                                            interfaces: device.interfaces.map(
+                                                                                                (deviceInterface, interfaceIndex) =>
+                                                                                                    interfaceIndex === index
+                                                                                                        ? {
+                                                                                                              ...deviceInterface,
+                                                                                                              subnet_mask: event.target.value || null,
+                                                                                                          }
+                                                                                                        : deviceInterface,
+                                                                                            ),
+                                                                                        }))
+                                                                                    }
+                                                                                />
+                                                                            </label>
+                                                                        </>
+                                                                    )}
+
+                                                                    {isL3Switch(selectedDevice) && interfaceRole === 'routed' && (
+                                                                        <>
+                                                                            <label className="field-group">
+                                                                                <span>Routed ポートの IP アドレス</span>
+                                                                                <input
+                                                                                    className="editor-input"
+                                                                                    value={iface.ip_address ?? ''}
+                                                                                    onChange={(event) =>
+                                                                                        updateSelectedDevice((device) => ({
+                                                                                            ...device,
+                                                                                            interfaces: device.interfaces.map(
+                                                                                                (deviceInterface, interfaceIndex) =>
+                                                                                                    interfaceIndex === index
+                                                                                                        ? {
+                                                                                                              ...deviceInterface,
+                                                                                                              ip_address: event.target.value || null,
+                                                                                                          }
+                                                                                                        : deviceInterface,
+                                                                                            ),
+                                                                                        }))
+                                                                                    }
+                                                                                />
+                                                                            </label>
+                                                                            <label className="field-group">
+                                                                                <span>Routed ポートのサブネットマスク</span>
+                                                                                <input
+                                                                                    className="editor-input"
+                                                                                    value={iface.subnet_mask ?? ''}
+                                                                                    onChange={(event) =>
+                                                                                        updateSelectedDevice((device) => ({
+                                                                                            ...device,
+                                                                                            interfaces: device.interfaces.map(
+                                                                                                (deviceInterface, interfaceIndex) =>
+                                                                                                    interfaceIndex === index
+                                                                                                        ? {
+                                                                                                              ...deviceInterface,
+                                                                                                              subnet_mask: event.target.value || null,
+                                                                                                          }
+                                                                                                        : deviceInterface,
+                                                                                            ),
+                                                                                        }))
+                                                                                    }
+                                                                                />
+                                                                            </label>
+                                                                        </>
                                                                     )}
                                                                 </div>
                                                                 <button
@@ -2422,6 +2888,32 @@ export default function NetworkEditor() {
 
                                     {selectedEditorTab === 'routing' && supportsStaticRouting(selectedDevice) && (
                                         <div className="detail-section">
+                                            <div className="detail-card">
+                                                <span className="detail-heading">直結ネットワーク</span>
+                                                <p className="selected-summary-text">
+                                                    同じ L3 機器に直接設定されたネットワークは、スタティックルートを追加しなくても自動でルーティングされます。
+                                                </p>
+                                                {routeCapableInterfaces(selectedDevice).length === 0 ? (
+                                                    <p className="selected-summary-text">
+                                                        直結ネットワークとして扱える IP 設定済みインターフェースはまだありません。
+                                                    </p>
+                                                ) : (
+                                                    routeCapableInterfaces(selectedDevice).map((iface) => (
+                                                        <div
+                                                            key={`${selectedDevice.client_id}-connected-${iface.client_id}`}
+                                                            className="inline-link-row"
+                                                        >
+                                                            <span>
+                                                                {iface.name} ({interfaceRoleLabel(selectedDevice, iface)})
+                                                            </span>
+                                                            <span>
+                                                                {iface.ip_address}/{iface.subnet_mask}
+                                                            </span>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+
                                             <div className="detail-heading-row">
                                                 <span className="detail-heading">スタティックルート</span>
                                                 <button
@@ -2455,6 +2947,26 @@ export default function NetworkEditor() {
                                                     key={`${selectedDevice.client_id}-route-${index}`}
                                                     className="detail-card"
                                                 >
+                                                    <div className="detail-heading-row">
+                                                        <span className="detail-heading">
+                                                            スタティックルート {index + 1}
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            className="mini-button"
+                                                            onClick={() =>
+                                                                updateSelectedDevice((device) => ({
+                                                                    ...device,
+                                                                    route_entries: removeRouteEntry(
+                                                                        device.route_entries,
+                                                                        index,
+                                                                    ),
+                                                                }))
+                                                            }
+                                                        >
+                                                            削除
+                                                        </button>
+                                                    </div>
                                                     <div className="modal-form-grid">
                                                         <label className="field-group">
                                                             <span>宛先ネットワーク</span>
@@ -2528,7 +3040,7 @@ export default function NetworkEditor() {
                                                                 }
                                                             >
                                                                 <option value="">インターフェースを選択</option>
-                                                                {selectedDevice.interfaces.map((iface) => (
+                                                                {routeCapableInterfaces(selectedDevice).map((iface) => (
                                                                     <option
                                                                         key={iface.client_id}
                                                                         value={iface.client_id}

@@ -355,7 +355,7 @@ body {
 
 .field-group {
     display: grid;
-    gap: 8px;
+    gap: 6px;
     color: #334155;
     font-size: 0.92rem;
 }
@@ -635,14 +635,14 @@ body {
 }
 
 .node-modal {
-    width: min(980px, calc(100vw - 48px));
+    width: min(920px, calc(100vw - 48px));
     max-height: calc(100vh - 48px);
     overflow: auto;
     border: 1px solid rgba(226, 232, 240, 0.95);
     border-radius: 28px;
     background: rgba(255, 255, 255, 0.98);
     box-shadow: 0 28px 80px rgba(148, 163, 184, 0.28);
-    padding: 24px;
+    padding: 20px;
 }
 
 .node-modal-header,
@@ -702,20 +702,52 @@ body {
 
 .modal-form-grid {
     display: grid;
-    gap: 12px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .interface-editor-layout {
     display: grid;
-    gap: 16px;
-    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-    align-items: start;
+    gap: 12px;
+    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+    align-items: stretch;
+    height: min(62vh, 680px);
+    min-height: 0;
+    overflow: hidden;
 }
 
 .interface-list {
     display: grid;
-    gap: 10px;
+    gap: 8px;
+}
+
+.interface-pane {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+}
+
+.interface-list-sections {
+    display: grid;
+    gap: 12px;
+    grid-template-rows: minmax(0, 1.35fr) minmax(0, 0.95fr);
+    min-height: 0;
+    height: 100%;
+}
+
+.interface-list-section {
+    display: grid;
+    gap: 8px;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.interface-list-scroll {
+    min-height: 0;
+    height: 100%;
+    overflow: auto;
+    padding-right: 4px;
 }
 
 .interface-list-item {
@@ -727,7 +759,7 @@ body {
     color: #334155;
     cursor: pointer;
     font: inherit;
-    padding: 12px;
+    padding: 10px 12px;
     text-align: left;
 }
 
@@ -762,7 +794,10 @@ body {
 }
 
 .interface-editor-panel {
-    min-height: 100%;
+    min-height: 0;
+    max-height: 100%;
+    align-content: start;
+    overflow: auto;
 }
 
 .context-menu {

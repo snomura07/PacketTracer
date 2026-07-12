@@ -60,11 +60,16 @@ class NetworkProjectTopologyService
                     'id' => $device->id,
                     'client_id' => $this->deviceClientId($device->id),
                     'name' => $device->name,
-                    'type' => $device->effectiveType(),
+                    'type' => $device->topologyType(),
                     'position_x' => $device->position_x,
                     'position_y' => $device->position_y,
                     'default_gateway' => $device->default_gateway,
-                    'metadata_json' => $device->metadata_json,
+                    'metadata_json' => $device->isSwitch()
+                        ? [...($device->metadata_json ?? []), 'switch_mode' => $device->switchMode()]
+                        : $this->normalizeDeviceMetadata(
+                            $device->topologyType(),
+                            $device->metadata_json ?? [],
+                        ),
                     'interfaces' => $device->interfaces
                         ->sortBy('id')
                         ->values()
@@ -143,28 +148,43 @@ class NetworkProjectTopologyService
                 $devicePayload['type'],
                 $devicePayload['metadata_json'] ?? [],
             );
+            $normalizedMetadata = $this->normalizeDeviceMetadata(
+                $normalizedType,
+                $devicePayload['metadata_json'] ?? [],
+                $devicePayload['type'],
+            );
             $device = $project->devices()->create([
                 'name' => $devicePayload['name'],
                 'type' => $normalizedType,
                 'position_x' => $devicePayload['position_x'],
                 'position_y' => $devicePayload['position_y'],
                 'default_gateway' => $devicePayload['default_gateway'] ?? null,
-                'metadata_json' => $this->normalizeDeviceMetadata(
-                    $normalizedType,
-                    $devicePayload['metadata_json'] ?? [],
-                ),
+                'metadata_json' => $normalizedMetadata,
             ]);
 
             foreach ($devicePayload['interfaces'] as $interfacePayload) {
+                $normalizedInterfaceMetadata = $this->normalizeInterfaceMetadata(
+                    $normalizedType,
+                    $normalizedMetadata,
+                    $interfacePayload['metadata_json'] ?? [],
+                );
+
                 $interface = $device->interfaces()->create([
                     'name' => $interfacePayload['name'],
-                    'ip_address' => $interfacePayload['ip_address'] ?? null,
-                    'subnet_mask' => $interfacePayload['subnet_mask'] ?? null,
-                    'mac_address' => $this->normalizeMacAddress($interfacePayload['mac_address'] ?? null),
-                    'metadata_json' => $this->normalizeInterfaceMetadata(
+                    'ip_address' => $this->normalizeInterfaceIpAddress(
                         $normalizedType,
-                        $interfacePayload['metadata_json'] ?? [],
+                        $normalizedMetadata,
+                        $normalizedInterfaceMetadata,
+                        $interfacePayload['ip_address'] ?? null,
                     ),
+                    'subnet_mask' => $this->normalizeInterfaceSubnetMask(
+                        $normalizedType,
+                        $normalizedMetadata,
+                        $normalizedInterfaceMetadata,
+                        $interfacePayload['subnet_mask'] ?? null,
+                    ),
+                    'mac_address' => $this->normalizeMacAddress($interfacePayload['mac_address'] ?? null),
+                    'metadata_json' => $normalizedInterfaceMetadata,
                 ]);
 
                 $interfaceIdsByClientId[$interfacePayload['client_id']] = $interface->id;
@@ -244,28 +264,33 @@ class NetworkProjectTopologyService
     private function normalizeDeviceType(string $type, array $metadata): string
     {
         return match ($type) {
-            Device::TYPE_SWITCH => ($metadata['switch_mode'] ?? 'l2') === 'l3'
-                ? Device::TYPE_L3_SWITCH
-                : Device::TYPE_L2_SWITCH,
+            Device::TYPE_SWITCH,
             Device::TYPE_L2_SWITCH,
             Device::TYPE_L3_SWITCH,
             Device::TYPE_ONU,
             Device::TYPE_AP,
             Device::TYPE_PC,
             Device::TYPE_ROUTER,
-            Device::TYPE_FIREWALL => $type,
+            Device::TYPE_FIREWALL => $type === Device::TYPE_L3_SWITCH || $type === Device::TYPE_L2_SWITCH
+                ? Device::TYPE_SWITCH
+                : $type,
             default => throw new InvalidArgumentException('Unknown device type.'),
         };
     }
 
-    private function normalizeDeviceMetadata(string $type, array $metadata): array
+    private function normalizeDeviceMetadata(
+        string $type,
+        array $metadata,
+        ?string $originalType = null,
+    ): array
     {
-        if ($type === Device::TYPE_L2_SWITCH) {
-            return [...$metadata, 'switch_mode' => 'l2'];
-        }
+        if ($type === Device::TYPE_SWITCH) {
+            $switchMode = $originalType === Device::TYPE_L3_SWITCH ||
+                ($metadata['switch_mode'] ?? null) === 'l3'
+                ? 'l3'
+                : 'l2';
 
-        if ($type === Device::TYPE_L3_SWITCH) {
-            return [...$metadata, 'switch_mode' => 'l3'];
+            return [...$metadata, 'switch_mode' => $switchMode];
         }
 
         if ($type === Device::TYPE_AP) {
@@ -287,22 +312,24 @@ class NetworkProjectTopologyService
         return $metadata;
     }
 
-    private function normalizeInterfaceMetadata(string $deviceType, array $metadata): array
+    private function normalizeInterfaceMetadata(
+        string $deviceType,
+        array $deviceMetadata,
+        array $metadata,
+    ): array
     {
-        if ($deviceType === Device::TYPE_L2_SWITCH) {
-            return [
-                'role' => 'switchport',
-                'access_vlan' => (int) ($metadata['access_vlan'] ?? 1),
-            ];
-        }
-
-        if ($deviceType === Device::TYPE_L3_SWITCH) {
+        if ($deviceType === Device::TYPE_SWITCH) {
             $role = (string) ($metadata['role'] ?? 'switchport');
+            $switchMode = ($deviceMetadata['switch_mode'] ?? null) === 'l3' ? 'l3' : 'l2';
+
+            if ($switchMode !== 'l3' && $role !== 'switchport') {
+                $role = 'switchport';
+            }
 
             if ($role === 'svi') {
                 return [
                     'role' => 'svi',
-                    'vlan_id' => (int) ($metadata['vlan_id'] ?? 1),
+                    'vlan_id' => $this->normalizeVlanId($metadata['vlan_id'] ?? 1),
                 ];
             }
 
@@ -314,14 +341,14 @@ class NetworkProjectTopologyService
 
             return [
                 'role' => 'switchport',
-                'access_vlan' => (int) ($metadata['access_vlan'] ?? 1),
+                'access_vlan' => $this->normalizeVlanId($metadata['access_vlan'] ?? 1),
             ];
         }
 
         if ($deviceType === Device::TYPE_ONU || $deviceType === Device::TYPE_AP) {
             return [
                 'role' => 'switchport',
-                'access_vlan' => (int) ($metadata['access_vlan'] ?? 1),
+                'access_vlan' => $this->normalizeVlanId($metadata['access_vlan'] ?? 1),
             ];
         }
 
@@ -331,6 +358,54 @@ class NetworkProjectTopologyService
     private function interfaceClientId(int $id): string
     {
         return "interface-{$id}";
+    }
+
+    private function normalizeVlanId(mixed $value): int
+    {
+        $normalized = (int) $value;
+
+        return $normalized > 0 ? $normalized : 1;
+    }
+
+    private function normalizeInterfaceIpAddress(
+        string $deviceType,
+        array $deviceMetadata,
+        array $interfaceMetadata,
+        ?string $ipAddress,
+    ): ?string
+    {
+        return $this->interfaceSupportsLayer3Addressing($deviceType, $deviceMetadata, $interfaceMetadata)
+            ? $ipAddress
+            : null;
+    }
+
+    private function normalizeInterfaceSubnetMask(
+        string $deviceType,
+        array $deviceMetadata,
+        array $interfaceMetadata,
+        ?string $subnetMask,
+    ): ?string
+    {
+        return $this->interfaceSupportsLayer3Addressing($deviceType, $deviceMetadata, $interfaceMetadata)
+            ? $subnetMask
+            : null;
+    }
+
+    private function interfaceSupportsLayer3Addressing(
+        string $deviceType,
+        array $deviceMetadata,
+        array $interfaceMetadata,
+    ): bool
+    {
+        if ($deviceType !== Device::TYPE_SWITCH) {
+            return true;
+        }
+
+        if (($deviceMetadata['switch_mode'] ?? 'l2') !== 'l3') {
+            return false;
+        }
+
+        return in_array($interfaceMetadata['role'] ?? 'switchport', ['svi', 'routed'], true);
     }
 
     private function cloudClientId(int $id): string

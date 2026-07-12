@@ -49,8 +49,7 @@ Device
 
 ```text
 pc
-l2_switch
-l3_switch
+switch
 onu
 ap
 router
@@ -61,9 +60,15 @@ firewall
 
 PCのデフォルトゲートウェイはDeviceに持たせる。
 
+Switch は `metadata_json.switch_mode` により `l2` / `l3` を切り替える。
+
 L2 SwitchはVLAN内のL2転送を担う機器として扱い、L3ルーティング情報は持たせない。
 
-L3 Switchは複数インターフェースにIPを持てるL3機器として扱い、RouteEntryを持てる。
+L2 Switchの物理ポートは `switchport` として扱い、各ポートに通常のIPアドレスやサブネットマスクは持たせない。
+
+管理用IPが必要な場合は、将来的に管理SVIとして表現する。
+
+L3 Switchは将来的に SVI ベースへ移行できる構造を維持しつつ、現段階では複数インターフェースにIPを持てるL3機器として扱い、RouteEntryを持てる。
 
 ONUは光アクセス回線の終端装置として扱い、初期段階ではL2受け渡しのみを担う。
 
