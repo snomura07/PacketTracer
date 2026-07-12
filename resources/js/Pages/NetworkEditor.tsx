@@ -2267,7 +2267,7 @@ export default function NetworkEditor() {
 
                                     {selectedEditorTab === 'interfaces' && (
                                         <div className="interface-editor-layout">
-                                            <div className="detail-section">
+                                            <div className="detail-section interface-pane">
                                                 <div className="detail-heading-row">
                                                     <span className="detail-heading">
                                                         {isL3Switch(selectedDevice)
@@ -2299,15 +2299,6 @@ export default function NetworkEditor() {
                                                                 追加
                                                             </button>
                                                         )}
-                                                        {isL3Switch(selectedDevice) && (
-                                                            <button
-                                                                type="button"
-                                                                className="mini-button"
-                                                                onClick={addSviToSelectedDevice}
-                                                            >
-                                                                SVI を追加
-                                                            </button>
-                                                        )}
                                                         {selectedDevice.type === 'pc' &&
                                                             selectedDevice.interfaces.length > 1 &&
                                                             selectedInterface && (
@@ -2317,17 +2308,6 @@ export default function NetworkEditor() {
                                                                     onClick={removeSelectedInterface}
                                                                 >
                                                                     これを削除
-                                                                </button>
-                                                            )}
-                                                        {isL3Switch(selectedDevice) &&
-                                                            selectedInterface &&
-                                                            isSviInterface(selectedDevice, selectedInterface) && (
-                                                                <button
-                                                                    type="button"
-                                                                    className="mini-button"
-                                                                    onClick={removeSelectedInterface}
-                                                                >
-                                                                    この SVI を削除
                                                                 </button>
                                                             )}
                                                     </div>
@@ -2374,7 +2354,7 @@ export default function NetworkEditor() {
                                                     <div className="interface-list-sections">
                                                         <div className="interface-list-section">
                                                             <span className="detail-heading">物理ポート</span>
-                                                            <div className="interface-list">
+                                                            <div className="interface-list interface-list-scroll">
                                                                 {physicalInterfaces(selectedDevice).map((iface) => {
                                                                     const linkStatus = project.links.some(
                                                                         (link) =>
@@ -2403,8 +2383,32 @@ export default function NetworkEditor() {
                                                             </div>
                                                         </div>
                                                         <div className="interface-list-section">
-                                                            <span className="detail-heading">SVI</span>
-                                                            <div className="interface-list">
+                                                            <div className="detail-heading-row">
+                                                                <span className="detail-heading">SVI</span>
+                                                                <div className="modal-inline-actions">
+                                                                    <button
+                                                                        type="button"
+                                                                        className="mini-button"
+                                                                        onClick={addSviToSelectedDevice}
+                                                                    >
+                                                                        SVI を追加
+                                                                    </button>
+                                                                    {selectedInterface &&
+                                                                        isSviInterface(
+                                                                            selectedDevice,
+                                                                            selectedInterface,
+                                                                        ) && (
+                                                                            <button
+                                                                                type="button"
+                                                                                className="mini-button"
+                                                                                onClick={removeSelectedInterface}
+                                                                            >
+                                                                                この SVI を削除
+                                                                            </button>
+                                                                        )}
+                                                                </div>
+                                                            </div>
+                                                            <div className="interface-list interface-list-scroll">
                                                                 {sviInterfaces(selectedDevice).length === 0 && (
                                                                     <div className="detail-card">
                                                                         <span className="selected-summary-text">

@@ -710,7 +710,10 @@ body {
     display: grid;
     gap: 12px;
     grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
-    align-items: start;
+    align-items: stretch;
+    height: min(62vh, 680px);
+    min-height: 0;
+    overflow: hidden;
 }
 
 .interface-list {
@@ -718,14 +721,33 @@ body {
     gap: 8px;
 }
 
+.interface-pane {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+}
+
 .interface-list-sections {
     display: grid;
     gap: 12px;
+    grid-template-rows: minmax(0, 1.35fr) minmax(0, 0.95fr);
+    min-height: 0;
+    height: 100%;
 }
 
 .interface-list-section {
     display: grid;
     gap: 8px;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.interface-list-scroll {
+    min-height: 0;
+    height: 100%;
+    overflow: auto;
+    padding-right: 4px;
 }
 
 .interface-list-item {
@@ -772,8 +794,10 @@ body {
 }
 
 .interface-editor-panel {
-    min-height: auto;
+    min-height: 0;
+    max-height: 100%;
     align-content: start;
+    overflow: auto;
 }
 
 .context-menu {
