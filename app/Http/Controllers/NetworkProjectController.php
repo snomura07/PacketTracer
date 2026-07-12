@@ -51,6 +51,15 @@ class NetworkProjectController extends Controller
         ]);
     }
 
+    public function destroy(NetworkProject $networkProject): JsonResponse
+    {
+        $networkProject->delete();
+
+        return response()->json([
+            'deleted' => true,
+        ]);
+    }
+
     private function validatedPayload(Request $request): array
     {
         return $request->validate([

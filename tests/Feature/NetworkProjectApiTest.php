@@ -93,6 +93,21 @@ class NetworkProjectApiTest extends TestCase
             ->assertJsonPath('projects.1.name', 'HQ Internet Access');
     }
 
+    public function test_it_deletes_a_saved_project(): void
+    {
+        $projectId = $this->postJson('/api/network-projects', $this->samplePayload())
+            ->json('project.id');
+
+        $this->deleteJson("/api/network-projects/{$projectId}")
+            ->assertOk()
+            ->assertJsonPath('deleted', true);
+
+        $this->assertDatabaseCount('network_projects', 0);
+        $this->assertDatabaseCount('devices', 0);
+        $this->assertDatabaseCount('device_interfaces', 0);
+        $this->assertDatabaseCount('links', 0);
+    }
+
     public function test_it_returns_switch_devices_with_switch_mode_and_accepts_legacy_input_types(): void
     {
         $payload = $this->samplePayload();
