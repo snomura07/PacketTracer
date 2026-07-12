@@ -792,8 +792,10 @@ export default function NetworkEditor() {
     const [pendingLinkTargetNodeId, setPendingLinkTargetNodeId] = useState<string | null>(null);
     const [pendingLinkTargetInterfaceId, setPendingLinkTargetInterfaceId] = useState<string | null>(null);
     const [pingSourceDeviceId, setPingSourceDeviceId] = useState<number | null>(null);
+    const [pingDestinationMode, setPingDestinationMode] = useState<'node' | 'ip'>('ip');
     const [pingDestinationType, setPingDestinationType] = useState<'device' | 'cloud'>('device');
     const [pingDestinationId, setPingDestinationId] = useState<number | null>(null);
+    const [pingDestinationIp, setPingDestinationIp] = useState('');
     const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
     const [arpTable, setArpTable] = useState<ArpTableEntry[]>([]);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -937,16 +939,16 @@ export default function NetworkEditor() {
             loadedProject.devices.find((device: TopologyDevice) => device.type === 'pc')?.id ??
                 null,
         );
-        setPingDestinationType(
-            loadedProject.network_clouds.length > 0 ? 'cloud' : 'device',
-        );
+        setPingDestinationMode('ip');
+        setPingDestinationType('device');
         setPingDestinationId(
-            loadedProject.network_clouds[0]?.id ??
-                loadedProject.devices.find(
-                    (device: TopologyDevice) => device.type === 'pc',
-                )?.id ??
+            loadedProject.devices.find(
+                (device: TopologyDevice) => device.type === 'pc',
+            )?.id ??
+                loadedProject.network_clouds[0]?.id ??
                 null,
         );
+        setPingDestinationIp('');
         setSimulationResult(null);
         setContextMenu(null);
         resetLinkMode();
@@ -1024,6 +1026,10 @@ export default function NetworkEditor() {
             return;
         }
 
+        if (pingDestinationMode === 'ip') {
+            return;
+        }
+
         if (pingDestinationType === 'cloud') {
             if (pingDestinationCloudOptions.length === 0) {
                 if (pingDestinationId !== null) {
@@ -1063,6 +1069,7 @@ export default function NetworkEditor() {
         }
     }, [
         pingDestinationCloudOptions,
+        pingDestinationMode,
         pingDestinationDeviceOptions,
         pingDestinationId,
         pingDestinationType,
@@ -1500,8 +1507,18 @@ export default function NetworkEditor() {
             return;
         }
 
-        if (pingSourceDeviceId === null || pingDestinationId === null) {
-            setStatusMessage('Ping の送信元と宛先を選択してください');
+        if (pingSourceDeviceId === null) {
+            setStatusMessage('Ping の送信元を選択してください');
+            return;
+        }
+
+        if (pingDestinationMode === 'node' && pingDestinationId === null) {
+            setStatusMessage('Ping の宛先ノードを選択してください');
+            return;
+        }
+
+        if (pingDestinationMode === 'ip' && pingDestinationIp.trim() === '') {
+            setStatusMessage('Ping の宛先 IP を入力してください');
             return;
         }
 
@@ -1517,8 +1534,10 @@ export default function NetworkEditor() {
                 },
                 body: JSON.stringify({
                     source_device_id: pingSourceDeviceId,
+                    destination_mode: pingDestinationMode,
                     destination_type: pingDestinationType,
                     destination_id: pingDestinationId,
+                    destination_ip: pingDestinationIp.trim(),
                 }),
             });
             const data = await response.json();
@@ -1962,14 +1981,55 @@ export default function NetworkEditor() {
                         <PingPanel
                             projectId={projectId}
                             pingSourceDeviceId={pingSourceDeviceId}
+                            pingDestinationMode={pingDestinationMode}
                             pingDestinationType={pingDestinationType}
                             pingDestinationId={pingDestinationId}
+                            pingDestinationIp={pingDestinationIp}
                             pingSourceOptions={pingSourceOptions}
                             pingDestinationDeviceOptions={pingDestinationDeviceOptions}
                             pingDestinationCloudOptions={pingDestinationCloudOptions}
                             isSimulating={isSimulating}
                             simulationResult={simulationResult}
                             onPingSourceDeviceIdChange={setPingSourceDeviceId}
+                            onPingDestinationModeChange={(nextMode) => {
+                                setPingDestinationMode(nextMode);
+
+                                if (nextMode === 'node') {
+                                    setPingDestinationId(
+                                        pingDestinationType === 'cloud'
+                                            ? (pingDestinationCloudOptions[0]?.id ?? null)
+                                            : (pingDestinationDeviceOptions.find(
+                                                  (device) => device.id !== pingSourceDeviceId,
+                                              )?.id ?? null),
+                                    );
+
+                                    return;
+                                }
+
+                                setPingDestinationIp((currentIp) => {
+                                    if (currentIp.trim() !== '') {
+                                        return currentIp;
+                                    }
+
+                                    if (pingDestinationType === 'cloud') {
+                                        return (
+                                            pingDestinationCloudOptions[0]?.representative_ip ??
+                                            pingDestinationCloudOptions[0]?.network_address ??
+                                            ''
+                                        );
+                                    }
+
+                                    return (
+                                        pingDestinationDeviceOptions.find(
+                                            (device) => device.id !== pingSourceDeviceId,
+                                        )?.interfaces.find(
+                                            (iface) =>
+                                                iface.ip_address !== null &&
+                                                iface.subnet_mask !== null,
+                                        )?.ip_address ?? ''
+                                    );
+                                });
+                            }}
                             onPingDestinationTypeChange={(nextType) => {
                                 setPingDestinationType(nextType);
                                 setPingDestinationId(
@@ -1979,8 +2039,25 @@ export default function NetworkEditor() {
                                               (device) => device.id !== pingSourceDeviceId,
                                           )?.id ?? null),
                                 );
+
+                                if (pingDestinationMode === 'ip') {
+                                    setPingDestinationIp(
+                                        nextType === 'cloud'
+                                            ? (pingDestinationCloudOptions[0]?.representative_ip ??
+                                                  pingDestinationCloudOptions[0]?.network_address ??
+                                                  '')
+                                            : (pingDestinationDeviceOptions.find(
+                                                  (device) => device.id !== pingSourceDeviceId,
+                                              )?.interfaces.find(
+                                                  (iface) =>
+                                                      iface.ip_address !== null &&
+                                                      iface.subnet_mask !== null,
+                                              )?.ip_address ?? ''),
+                                    );
+                                }
                             }}
                             onPingDestinationIdChange={setPingDestinationId}
+                            onPingDestinationIpChange={setPingDestinationIp}
                             onRunPingSimulation={runPingSimulation}
                         />
 
