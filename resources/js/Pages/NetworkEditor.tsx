@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import {
     Background,
     type Connection,
+    ConnectionMode,
     Controls,
     MarkerType,
     MiniMap,
@@ -57,6 +58,12 @@ const nodeTypes = {
 };
 
 const SWITCH_PORT_COUNT_OPTIONS = [8, 24, 48] as const;
+const DEVICE_LEFT_SOURCE_HANDLE_PREFIX = 'device-left-source:';
+const DEVICE_LEFT_TARGET_HANDLE_PREFIX = 'device-left-target:';
+const DEVICE_RIGHT_SOURCE_HANDLE_PREFIX = 'device-right-source:';
+const DEVICE_RIGHT_TARGET_HANDLE_PREFIX = 'device-right-target:';
+const CLOUD_LEFT_TARGET_HANDLE_ID = 'cloud-left-target';
+const CLOUD_RIGHT_TARGET_HANDLE_ID = 'cloud-right-target';
 
 const nextClientId = (prefix: string): string =>
     `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
@@ -540,9 +547,52 @@ const buildCloudLabel = (cloud: TopologyCloud): string => {
     return lines.join('\n');
 };
 
+const deviceLeftSourceHandleId = (interfaceClientId: string): string =>
+    `${DEVICE_LEFT_SOURCE_HANDLE_PREFIX}${interfaceClientId}`;
+
+const deviceLeftTargetHandleId = (interfaceClientId: string): string =>
+    `${DEVICE_LEFT_TARGET_HANDLE_PREFIX}${interfaceClientId}`;
+
+const deviceRightSourceHandleId = (interfaceClientId: string): string =>
+    `${DEVICE_RIGHT_SOURCE_HANDLE_PREFIX}${interfaceClientId}`;
+
+const deviceRightTargetHandleId = (interfaceClientId: string): string =>
+    `${DEVICE_RIGHT_TARGET_HANDLE_PREFIX}${interfaceClientId}`;
+
+const parseDeviceHandleId = (handleId: string | null | undefined): string | null => {
+    if (!handleId) {
+        return null;
+    }
+
+    for (const prefix of [
+        DEVICE_LEFT_SOURCE_HANDLE_PREFIX,
+        DEVICE_LEFT_TARGET_HANDLE_PREFIX,
+        DEVICE_RIGHT_SOURCE_HANDLE_PREFIX,
+        DEVICE_RIGHT_TARGET_HANDLE_PREFIX,
+    ]) {
+        if (handleId.startsWith(prefix)) {
+            return handleId.slice(prefix.length);
+        }
+    }
+
+    return null;
+};
+
+const cloudTargetHandleIdForSide = (side: 'left' | 'right'): string =>
+    side === 'left' ? CLOUD_LEFT_TARGET_HANDLE_ID : CLOUD_RIGHT_TARGET_HANDLE_ID;
+
+const edgeSideForNodes = (
+    sourceX: number,
+    targetX: number,
+): { source: 'left' | 'right'; target: 'left' | 'right' } =>
+    sourceX <= targetX
+        ? { source: 'right', target: 'left' }
+        : { source: 'left', target: 'right' };
+
 const buildNodes = (
     project: TopologyProject,
     selectedNodeId: string,
+    isInterfaceConnected: (interfaceClientId: string) => boolean,
     onSelectNode: (nodeId: string) => void,
     onNodeContextMenu: (
         event: React.MouseEvent<HTMLDivElement>,
@@ -557,6 +607,15 @@ const buildNodes = (
             title: device.name,
             category: buildDeviceCategory(device),
             details: buildDeviceLabel(device).split('\n').slice(2),
+            ports: physicalInterfaces(device).map((iface) => ({
+                key: iface.client_id,
+                label: iface.name,
+                connected: isInterfaceConnected(iface.client_id),
+                leftSourceHandleId: deviceLeftSourceHandleId(iface.client_id),
+                leftTargetHandleId: deviceLeftTargetHandleId(iface.client_id),
+                rightSourceHandleId: deviceRightSourceHandleId(iface.client_id),
+                rightTargetHandleId: deviceRightTargetHandleId(iface.client_id),
+            })),
             kind: device.type,
             onSelect: () => onSelectNode(device.client_id),
             onContextMenu: (event: React.MouseEvent<HTMLDivElement>) =>
@@ -572,6 +631,17 @@ const buildNodes = (
             title: cloud.name,
             category: cloud.type.toUpperCase(),
             details: buildCloudLabel(cloud).split('\n').slice(2),
+            ports: [
+                {
+                    key: `${cloud.client_id}-uplink`,
+                    label: 'uplink',
+                    connected: false,
+                    leftSourceHandleId: null,
+                    leftTargetHandleId: CLOUD_LEFT_TARGET_HANDLE_ID,
+                    rightSourceHandleId: null,
+                    rightTargetHandleId: CLOUD_RIGHT_TARGET_HANDLE_ID,
+                },
+            ],
             kind: cloud.type,
             onSelect: () => onSelectNode(cloud.client_id),
             onContextMenu: (event: React.MouseEvent<HTMLDivElement>) =>
@@ -601,10 +671,27 @@ const buildEdges = (project: TopologyProject): Edge[] => {
                 return null;
             }
 
+            const sourceX =
+                project.devices.find((device) => device.client_id === source)?.position_x ?? 0;
+            const targetX =
+                project.devices.find((device) => device.client_id === target)?.position_x ??
+                project.network_clouds.find((cloud) => cloud.client_id === target)?.position_x ??
+                0;
+            const edgeSide = edgeSideForNodes(sourceX, targetX);
+
             return {
                 id: link.client_id,
                 source,
                 target,
+                sourceHandle:
+                    edgeSide.source === 'left'
+                        ? deviceLeftSourceHandleId(link.interface_a_client_id)
+                        : deviceRightSourceHandleId(link.interface_a_client_id),
+                targetHandle: link.interface_b_client_id
+                    ? edgeSide.target === 'left'
+                        ? deviceLeftTargetHandleId(link.interface_b_client_id)
+                        : deviceRightTargetHandleId(link.interface_b_client_id)
+                    : cloudTargetHandleIdForSide(edgeSide.target),
                 markerEnd: { type: MarkerType.ArrowClosed },
             } satisfies Edge;
         })
@@ -831,55 +918,80 @@ export default function NetworkEditor() {
             ? project.network_clouds.find((cloud) => cloud.client_id === pendingLinkTargetNodeId) ??
               null
             : null;
-    const selectedNodeLinkSummaries = project.links
-        .filter((link) => {
-            if (selectedDevice) {
-                const interfaceIds = new Set(
-                    selectedDevice.interfaces.map((iface) => iface.client_id),
-                );
+    const selectedDevicePortLinks = selectedDevice
+        ? physicalInterfaces(selectedDevice).map((iface) => {
+              const link =
+                  project.links.find(
+                      (candidate) =>
+                          candidate.interface_a_client_id === iface.client_id ||
+                          candidate.interface_b_client_id === iface.client_id,
+                  ) ?? null;
 
-                return (
-                    interfaceIds.has(link.interface_a_client_id) ||
-                    (link.interface_b_client_id !== null &&
-                        interfaceIds.has(link.interface_b_client_id))
-                );
-            }
+              if (link === null) {
+                  return {
+                      interfaceClientId: iface.client_id,
+                      interfaceName: iface.name,
+                      status: '未接続',
+                      peerLabel: '接続先なし',
+                      linkClientId: null,
+                  };
+              }
 
-            if (selectedCloud) {
-                return link.network_cloud_client_id === selectedCloud.client_id;
-            }
+              const peerInterfaceId =
+                  link.interface_a_client_id === iface.client_id
+                      ? link.interface_b_client_id
+                      : link.interface_a_client_id;
+              const peerDevice =
+                  peerInterfaceId !== null
+                      ? project.devices.find((device) =>
+                            device.interfaces.some(
+                                (candidate) => candidate.client_id === peerInterfaceId,
+                            ),
+                        ) ?? null
+                      : null;
+              const peerInterface =
+                  peerInterfaceId !== null && peerDevice
+                      ? peerDevice.interfaces.find(
+                            (candidate) => candidate.client_id === peerInterfaceId,
+                        ) ?? null
+                      : null;
+              const peerCloud =
+                  link.network_cloud_client_id !== null
+                      ? project.network_clouds.find(
+                            (cloud) => cloud.client_id === link.network_cloud_client_id,
+                        ) ?? null
+                      : null;
 
-            return false;
-        })
-        .map((link) => {
-            const sourceDevice = project.devices.find((device) =>
-                device.interfaces.some(
-                    (iface) => iface.client_id === link.interface_a_client_id,
-                ),
-            );
-            const targetDevice =
-                link.interface_b_client_id !== null
-                    ? project.devices.find((device) =>
-                          device.interfaces.some(
-                              (iface) => iface.client_id === link.interface_b_client_id,
-                          ),
-                      )
-                    : null;
-            const targetCloud =
-                link.network_cloud_client_id !== null
-                    ? project.network_clouds.find(
-                          (cloud) =>
-                              cloud.client_id === link.network_cloud_client_id,
-                      )
-                    : null;
+              return {
+                  interfaceClientId: iface.client_id,
+                  interfaceName: iface.name,
+                  status: '接続中',
+                  peerLabel: peerCloud
+                      ? `${peerCloud.name}`
+                      : `${peerDevice?.name ?? 'Unknown'}:${peerInterface?.name ?? 'unknown'}`,
+                  linkClientId: link.client_id,
+              };
+          })
+        : [];
+    const selectedCloudLinks = selectedCloud
+        ? project.links
+              .filter((link) => link.network_cloud_client_id === selectedCloud.client_id)
+              .map((link) => {
+                  const sourceDevice = project.devices.find((device) =>
+                      device.interfaces.some(
+                          (iface) => iface.client_id === link.interface_a_client_id,
+                      ),
+                  );
+                  const sourceInterface = sourceDevice?.interfaces.find(
+                      (iface) => iface.client_id === link.interface_a_client_id,
+                  );
 
-            return {
-                client_id: link.client_id,
-                label: `${sourceDevice?.name ?? 'Unknown'} -> ${
-                    targetDevice?.name ?? targetCloud?.name ?? 'Unknown'
-                }`,
-            };
-        });
+                  return {
+                      client_id: link.client_id,
+                      label: `${sourceDevice?.name ?? 'Unknown'}:${sourceInterface?.name ?? 'unknown'}`,
+                  };
+              })
+        : [];
     const pingSourceOptions = project.devices.filter(
         (device) => device.type === 'pc' && device.id !== undefined,
     );
@@ -1174,6 +1286,7 @@ export default function NetworkEditor() {
     const nodes = buildNodes(
         project,
         selectedNodeId,
+        isInterfaceConnected,
         handleNodeClick,
         handleNodeContextMenu,
     );
@@ -1759,12 +1872,19 @@ export default function NetworkEditor() {
         }
     };
 
-    const isInterfaceConnected = (interfaceId: string): boolean =>
-        project.links.some(
+    function isInterfaceConnected(interfaceId: string): boolean {
+        return project.links.some(
             (link) =>
                 link.interface_a_client_id === interfaceId ||
                 link.interface_b_client_id === interfaceId,
         );
+    }
+
+    const findDeviceInterface = (
+        device: TopologyDevice,
+        interfaceClientId: string,
+    ) =>
+        device.interfaces.find((iface) => iface.client_id === interfaceClientId) ?? null;
 
     const findFirstAvailableInterface = (device: TopologyDevice) =>
         device.interfaces.find((iface) => !isInterfaceConnected(iface.client_id)) ?? null;
@@ -1791,7 +1911,12 @@ export default function NetworkEditor() {
                 link.network_cloud_client_id === cloudClientId,
         );
 
-    const connectNodes = (sourceNodeId: string, targetNodeId: string) => {
+    const connectNodes = (
+        sourceNodeId: string,
+        targetNodeId: string,
+        sourceInterfaceId: string | null,
+        targetInterfaceId: string | null,
+    ) => {
         if (sourceNodeId === targetNodeId) {
             setStatusMessage('同じノード同士は接続できません');
             return;
@@ -1812,8 +1937,14 @@ export default function NetworkEditor() {
         }
 
         if (sourceDeviceNode && targetDeviceNode) {
-            const sourceInterface = findFirstAvailableInterface(sourceDeviceNode);
-            const targetInterface = findFirstAvailableInterface(targetDeviceNode);
+            const sourceInterface =
+                sourceInterfaceId !== null
+                    ? findDeviceInterface(sourceDeviceNode, sourceInterfaceId)
+                    : findFirstAvailableInterface(sourceDeviceNode);
+            const targetInterface =
+                targetInterfaceId !== null
+                    ? findDeviceInterface(targetDeviceNode, targetInterfaceId)
+                    : findFirstAvailableInterface(targetDeviceNode);
 
             if (sourceInterface === null) {
                 setStatusMessage(`${sourceDeviceNode.name} に未使用インターフェースがありません`);
@@ -1861,7 +1992,10 @@ export default function NetworkEditor() {
             return;
         }
 
-        const sourceInterface = findFirstAvailableInterface(deviceNode);
+        const sourceInterface =
+            sourceInterfaceId !== null
+                ? findDeviceInterface(deviceNode, sourceInterfaceId)
+                : findFirstAvailableInterface(deviceNode);
 
         if (sourceInterface === null) {
             setStatusMessage(`${deviceNode.name} にクラウド接続用の未使用インターフェースがありません`);
@@ -1896,7 +2030,12 @@ export default function NetworkEditor() {
             return;
         }
 
-        connectNodes(connection.source, connection.target);
+        connectNodes(
+            connection.source,
+            connection.target,
+            parseDeviceHandleId(connection.sourceHandle),
+            parseDeviceHandleId(connection.targetHandle),
+        );
     };
 
     return (
@@ -1948,9 +2087,11 @@ export default function NetworkEditor() {
                                 fitView
                                 minZoom={0.2}
                                 maxZoom={4}
+                                connectionRadius={28}
                                 nodes={nodes}
                                 edges={edges}
                                 nodeTypes={nodeTypes}
+                                connectionMode={ConnectionMode.Strict}
                                 onConnect={handleConnect}
                                 onInit={setFlowInstance}
                                 onNodeClick={(_, node) => handleNodeClick(node.id)}
@@ -3296,24 +3437,49 @@ export default function NetworkEditor() {
 
                                     {selectedEditorTab === 'links' && (
                                         <div className="detail-section">
-                                            <span className="detail-heading">リンク</span>
-                                            {selectedNodeLinkSummaries.length === 0 ? (
+                                            <span className="detail-heading">ポート状況</span>
+                                            {selectedDevicePortLinks.length === 0 ? (
                                                 <p className="selected-summary-text">
-                                                    接続されているリンクはありません。
+                                                    表示できる物理ポートはありません。
                                                 </p>
                                             ) : (
-                                                selectedNodeLinkSummaries.map((link) => (
-                                                    <div key={link.client_id} className="inline-link-row">
-                                                        <span>{link.label}</span>
-                                                        <button
-                                                            type="button"
-                                                            className="mini-button"
-                                                            onClick={() => deleteLink(link.client_id)}
+                                                <div className="port-link-list">
+                                                    {selectedDevicePortLinks.map((portLink) => (
+                                                        <div
+                                                            key={portLink.interfaceClientId}
+                                                            className="detail-card port-link-row"
                                                         >
-                                                            削除
-                                                        </button>
-                                                    </div>
-                                                ))
+                                                            <div className="port-link-content">
+                                                                <div className="port-link-main">
+                                                                    <strong>{portLink.interfaceName}</strong>
+                                                                    <span
+                                                                        className={`port-link-status ${
+                                                                            portLink.status === '接続中'
+                                                                                ? 'is-connected'
+                                                                                : 'is-disconnected'
+                                                                        }`}
+                                                                    >
+                                                                        {portLink.status}
+                                                                    </span>
+                                                                </div>
+                                                                <span className="port-link-peer">
+                                                                    {portLink.peerLabel}
+                                                                </span>
+                                                            </div>
+                                                            {portLink.linkClientId && (
+                                                                <button
+                                                                    type="button"
+                                                                    className="mini-button"
+                                                                    onClick={() =>
+                                                                        deleteLink(portLink.linkClientId)
+                                                                    }
+                                                                >
+                                                                    削除
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             )}
                                         </div>
                                     )}
@@ -3389,12 +3555,12 @@ export default function NetworkEditor() {
                                     {selectedEditorTab === 'links' && (
                                         <div className="detail-section">
                                             <span className="detail-heading">リンク</span>
-                                            {selectedNodeLinkSummaries.length === 0 ? (
+                                            {selectedCloudLinks.length === 0 ? (
                                                 <p className="selected-summary-text">
                                                     接続されているリンクはありません。
                                                 </p>
                                             ) : (
-                                                selectedNodeLinkSummaries.map((link) => (
+                                                selectedCloudLinks.map((link) => (
                                                     <div key={link.client_id} className="inline-link-row">
                                                         <span>{link.label}</span>
                                                         <button

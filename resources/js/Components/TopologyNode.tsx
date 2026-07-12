@@ -1,9 +1,20 @@
-import { Handle, Position, type NodeProps } from 'reactflow';
+import { type NodeProps, Handle, Position } from 'reactflow';
+
+type TopologyPortHandle = {
+    key: string;
+    label: string;
+    connected: boolean;
+    leftSourceHandleId: string | null;
+    leftTargetHandleId: string | null;
+    rightSourceHandleId: string | null;
+    rightTargetHandleId: string | null;
+};
 
 type TopologyNodeData = {
     title: string;
     category: string;
     details: string[];
+    ports: TopologyPortHandle[];
     kind:
         | 'pc'
         | 'switch'
@@ -98,18 +109,85 @@ export default function TopologyNode({ data, selected }: NodeProps<TopologyNodeD
                 data.onContextMenu?.(event);
             }}
         >
-            <Handle type="target" position={Position.Left} className="topology-handle" />
-            <Handle type="source" position={Position.Right} className="topology-handle" />
+            <div className="node-port-rail is-left nodrag">
+                {data.ports.map((port) => (
+                    <div
+                        key={port.key}
+                        className={`node-port-row is-left nodrag ${
+                            port.connected ? 'is-connected' : ''
+                        }`}
+                    >
+                        <span className="node-port-name">{port.label}</span>
+                        <div className="node-port-end is-left nodrag">
+                            {port.leftTargetHandleId && (
+                                <Handle
+                                    id={port.leftTargetHandleId}
+                                    type="target"
+                                    position={Position.Left}
+                                    className="topology-port-handle"
+                                    isConnectable={!port.connected}
+                                />
+                            )}
+                            {port.leftSourceHandleId && (
+                                <Handle
+                                    id={port.leftSourceHandleId}
+                                    type="source"
+                                    position={Position.Left}
+                                    className="topology-port-handle"
+                                    isConnectable={!port.connected}
+                                />
+                            )}
+                        </div>
+                    </div>
+                ))}
+            </div>
 
-            <div className={`node-icon kind-${data.kind}`}>{iconForKind(data.kind)}</div>
-            <div className="node-copy">
-                <div className="node-title">{data.title}</div>
-                <div className="node-category">{data.category}</div>
-                <div className="node-details">
-                    {data.details.map((detail) => (
-                        <div key={detail}>{detail}</div>
-                    ))}
+            <div className="node-card">
+                <div className="node-core">
+                    <div className={`node-icon kind-${data.kind}`}>{iconForKind(data.kind)}</div>
+                    <div className="node-copy">
+                        <div className="node-title">{data.title}</div>
+                        <div className="node-category">{data.category}</div>
+                        <div className="node-details">
+                            {data.details.map((detail) => (
+                                <div key={detail}>{detail}</div>
+                            ))}
+                        </div>
+                    </div>
                 </div>
+            </div>
+
+            <div className="node-port-rail is-right nodrag">
+                {data.ports.map((port) => (
+                    <div
+                        key={`${port.key}-right`}
+                        className={`node-port-row is-right nodrag ${
+                            port.connected ? 'is-connected' : ''
+                        }`}
+                    >
+                        <div className="node-port-end is-right nodrag">
+                            {port.rightTargetHandleId && (
+                                <Handle
+                                    id={port.rightTargetHandleId}
+                                    type="target"
+                                    position={Position.Right}
+                                    className="topology-port-handle"
+                                    isConnectable={!port.connected}
+                                />
+                            )}
+                            {port.rightSourceHandleId && (
+                                <Handle
+                                    id={port.rightSourceHandleId}
+                                    type="source"
+                                    position={Position.Right}
+                                    className="topology-port-handle"
+                                    isConnectable={!port.connected}
+                                />
+                            )}
+                        </div>
+                        <span className="node-port-name">{port.label}</span>
+                    </div>
+                ))}
             </div>
         </div>
     );
