@@ -1,5 +1,7 @@
 export type DeviceType =
-    'pc' | 'l2_switch' | 'l3_switch' | 'onu' | 'ap' | 'router' | 'firewall';
+    'pc' | 'switch' | 'onu' | 'ap' | 'router' | 'firewall';
+
+export type SwitchMode = 'l2' | 'l3';
 
 export type NetworkCloudType = 'internet' | 'masters_one' | 'wan';
 

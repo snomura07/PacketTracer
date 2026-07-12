@@ -93,15 +93,15 @@ class NetworkProjectApiTest extends TestCase
             ->assertJsonPath('projects.1.name', 'HQ Internet Access');
     }
 
-    public function test_it_normalizes_legacy_switch_types_into_l2_and_l3_switches(): void
+    public function test_it_returns_switch_devices_with_switch_mode_and_accepts_legacy_input_types(): void
     {
         $payload = $this->samplePayload();
-        $payload['devices'][1]['type'] = 'switch';
+        $payload['devices'][1]['type'] = 'l3_switch';
         $payload['devices'][1]['metadata_json'] = ['switch_mode' => 'l3'];
 
         $this->postJson('/api/network-projects', $payload)
             ->assertCreated()
-            ->assertJsonPath('project.devices.1.type', 'l3_switch')
+            ->assertJsonPath('project.devices.1.type', 'switch')
             ->assertJsonPath('project.devices.1.metadata_json.switch_mode', 'l3');
     }
 
@@ -138,6 +138,37 @@ class NetworkProjectApiTest extends TestCase
             ->assertJsonPath('project.devices.2.type', 'ap')
             ->assertJsonPath('project.devices.2.metadata_json.ssid_profiles.0.name', 'CorpWiFi')
             ->assertJsonPath('project.devices.2.metadata_json.ssid_profiles.1.vlan_id', 20);
+    }
+
+    public function test_it_drops_ip_addressing_from_l2_switchports(): void
+    {
+        $payload = $this->samplePayload();
+        $payload['devices'][] = [
+            'client_id' => 'device-switch-2',
+            'name' => 'SW-2',
+            'type' => 'switch',
+            'position_x' => 300,
+            'position_y' => 120,
+            'default_gateway' => null,
+            'metadata_json' => ['switch_mode' => 'l2'],
+            'interfaces' => [
+                [
+                    'client_id' => 'sw-2-port1',
+                    'name' => 'port1',
+                    'ip_address' => '192.168.99.10',
+                    'subnet_mask' => '255.255.255.0',
+                    'mac_address' => '02:00:00:00:99:10',
+                    'metadata_json' => ['role' => 'switchport', 'access_vlan' => 99],
+                ],
+            ],
+            'route_entries' => [],
+        ];
+
+        $this->postJson('/api/network-projects', $payload)
+            ->assertCreated()
+            ->assertJsonPath('project.devices.2.type', 'switch')
+            ->assertJsonPath('project.devices.2.interfaces.0.ip_address', null)
+            ->assertJsonPath('project.devices.2.interfaces.0.subnet_mask', null);
     }
 
     private function samplePayload(): array

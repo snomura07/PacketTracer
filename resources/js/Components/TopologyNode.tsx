@@ -6,8 +6,7 @@ type TopologyNodeData = {
     details: string[];
     kind:
         | 'pc'
-        | 'l2_switch'
-        | 'l3_switch'
+        | 'switch'
         | 'onu'
         | 'ap'
         | 'router'
@@ -29,8 +28,7 @@ const iconForKind = (kind: TopologyNodeData['kind']) => {
                     <path d="M24 48h16l4 6H20z" />
                 </svg>
             );
-        case 'l2_switch':
-        case 'l3_switch':
+        case 'switch':
             return (
                 <svg viewBox="0 0 64 64" aria-hidden="true">
                     <rect x="8" y="18" width="48" height="28" rx="6" />

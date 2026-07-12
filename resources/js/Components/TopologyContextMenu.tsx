@@ -1,4 +1,4 @@
-import type { DeviceType, NetworkCloudType } from '../Types/network';
+import type { DeviceType, NetworkCloudType, SwitchMode } from '../Types/network';
 
 type FlowPosition = {
     x: number;
@@ -15,7 +15,7 @@ type ContextMenuState = {
 type TopologyContextMenuProps = {
     contextMenu: ContextMenuState;
     canAddInterface: boolean;
-    onAddDevice: (type: DeviceType, position: FlowPosition) => void;
+    onAddDevice: (type: DeviceType, position: FlowPosition, switchMode?: SwitchMode) => void;
     onAddCloud: (type: NetworkCloudType, position: FlowPosition) => void;
     onEditNode: (nodeId: string) => void;
     onAddInterface: () => void;
@@ -51,14 +51,14 @@ export default function TopologyContextMenu({
                     <button
                         type="button"
                         className="context-menu-item"
-                        onClick={() => onAddDevice('l2_switch', contextMenu.flowPosition)}
+                        onClick={() => onAddDevice('switch', contextMenu.flowPosition, 'l2')}
                     >
                         L2 スイッチを追加
                     </button>
                     <button
                         type="button"
                         className="context-menu-item"
-                        onClick={() => onAddDevice('l3_switch', contextMenu.flowPosition)}
+                        onClick={() => onAddDevice('switch', contextMenu.flowPosition, 'l3')}
                     >
                         L3 スイッチを追加
                     </button>
