@@ -3,34 +3,46 @@ import type { SimulationResult, TopologyCloud, TopologyDevice } from '../Types/n
 type PingPanelProps = {
     projectId: number | null;
     pingSourceDeviceId: number | null;
+    pingDestinationMode: 'node' | 'ip';
     pingDestinationType: 'device' | 'cloud';
     pingDestinationId: number | null;
+    pingDestinationIp: string;
     pingSourceOptions: TopologyDevice[];
     pingDestinationDeviceOptions: TopologyDevice[];
     pingDestinationCloudOptions: TopologyCloud[];
     isSimulating: boolean;
     simulationResult: SimulationResult | null;
     onPingSourceDeviceIdChange: (value: number | null) => void;
+    onPingDestinationModeChange: (value: 'node' | 'ip') => void;
     onPingDestinationTypeChange: (value: 'device' | 'cloud') => void;
     onPingDestinationIdChange: (value: number | null) => void;
+    onPingDestinationIpChange: (value: string) => void;
     onRunPingSimulation: () => void;
 };
 
 export default function PingPanel({
     projectId,
     pingSourceDeviceId,
+    pingDestinationMode,
     pingDestinationType,
     pingDestinationId,
+    pingDestinationIp,
     pingSourceOptions,
     pingDestinationDeviceOptions,
     pingDestinationCloudOptions,
     isSimulating,
     simulationResult,
     onPingSourceDeviceIdChange,
+    onPingDestinationModeChange,
     onPingDestinationTypeChange,
     onPingDestinationIdChange,
+    onPingDestinationIpChange,
     onRunPingSimulation,
 }: PingPanelProps) {
+    const availableDestinationDevices = pingDestinationDeviceOptions.filter(
+        (device) => device.id !== pingSourceDeviceId,
+    );
+
     return (
         <div className="selected-card">
             <p className="panel-label">Ping シミュレーション</p>
@@ -61,54 +73,84 @@ export default function PingPanel({
                     </select>
                 </label>
                 <label className="field-group">
-                    <span>宛先種別</span>
+                    <span>Ping モード</span>
                     <select
                         className="editor-input"
-                        value={pingDestinationType}
+                        value={pingDestinationMode}
                         disabled={projectId === null}
                         onChange={(event) =>
-                            onPingDestinationTypeChange(
-                                event.target.value as 'device' | 'cloud',
+                            onPingDestinationModeChange(
+                                event.target.value as 'node' | 'ip',
                             )
                         }
                     >
-                        <option value="device">PC</option>
-                        <option value="cloud">クラウド</option>
+                        <option value="node">ノード指定</option>
+                        <option value="ip">IP 指定</option>
                     </select>
                 </label>
-                <label className="field-group">
-                    <span>宛先</span>
-                    <select
-                        className="editor-input"
-                        value={pingDestinationId ?? ''}
-                        disabled={
-                            projectId === null ||
-                            (pingDestinationType === 'device'
-                                ? pingDestinationDeviceOptions.length === 0
-                                : pingDestinationCloudOptions.length === 0)
-                        }
-                        onChange={(event) =>
-                            onPingDestinationIdChange(
-                                event.target.value === '' ? null : Number(event.target.value),
-                            )
-                        }
-                    >
-                        <option value="">宛先を選択</option>
-                        {pingDestinationType === 'device'
-                            ? pingDestinationDeviceOptions
-                                  .filter((device) => device.id !== pingSourceDeviceId)
-                                  .map((device) => (
-                                      <option key={device.id} value={device.id}>
-                                          {device.name}
-                                      </option>
-                                  ))
-                            : pingDestinationCloudOptions.map((cloud) => (
-                                  <option key={cloud.id} value={cloud.id}>
-                                      {cloud.name}
-                                  </option>
-                              ))}
-                    </select>
-                </label>
+                {pingDestinationMode === 'node' ? (
+                    <>
+                        <label className="field-group">
+                            <span>宛先種別</span>
+                            <select
+                                className="editor-input"
+                                value={pingDestinationType}
+                                disabled={projectId === null}
+                                onChange={(event) =>
+                                    onPingDestinationTypeChange(
+                                        event.target.value as 'device' | 'cloud',
+                                    )
+                                }
+                            >
+                                <option value="device">PC</option>
+                                <option value="cloud">クラウド</option>
+                            </select>
+                        </label>
+                        <label className="field-group">
+                            <span>宛先</span>
+                            <select
+                                className="editor-input"
+                                value={pingDestinationId ?? ''}
+                                disabled={
+                                    projectId === null ||
+                                    (pingDestinationType === 'device'
+                                        ? availableDestinationDevices.length === 0
+                                        : pingDestinationCloudOptions.length === 0)
+                                }
+                                onChange={(event) =>
+                                    onPingDestinationIdChange(
+                                        event.target.value === '' ? null : Number(event.target.value),
+                                    )
+                                }
+                            >
+                                <option value="">宛先を選択</option>
+                                {pingDestinationType === 'device'
+                                    ? availableDestinationDevices.map((device) => (
+                                          <option key={device.id} value={device.id}>
+                                              {device.name}
+                                          </option>
+                                      ))
+                                    : pingDestinationCloudOptions.map((cloud) => (
+                                          <option key={cloud.id} value={cloud.id}>
+                                              {cloud.name}
+                                          </option>
+                                      ))}
+                            </select>
+                        </label>
+                    </>
+                ) : (
+                    <label className="field-group">
+                        <span>宛先 IP</span>
+                        <input
+                            type="text"
+                            className="editor-input"
+                            value={pingDestinationIp}
+                            disabled={projectId === null}
+                            placeholder="192.168.20.10"
+                            onChange={(event) => onPingDestinationIpChange(event.target.value)}
+                        />
+                    </label>
+                )}
                 <button
                     type="button"
                     className="action-button primary"

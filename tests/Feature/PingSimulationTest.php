@@ -584,4 +584,122 @@ class PingSimulationTest extends TestCase
             ->assertJsonCount(1, 'arp_table')
             ->assertJsonPath('arp_table.0.ip_address', '192.168.10.1');
     }
+
+    public function test_it_simulates_ping_to_a_device_by_ip_address(): void
+    {
+        $project = app(NetworkProjectTopologyService::class)->create([
+            'name' => 'PC to IP',
+            'description' => null,
+            'devices' => [
+                [
+                    'client_id' => 'pc-a',
+                    'name' => 'PC-A',
+                    'type' => Device::TYPE_PC,
+                    'position_x' => 0,
+                    'position_y' => 0,
+                    'default_gateway' => '192.168.10.1',
+                    'metadata_json' => [],
+                    'interfaces' => [[
+                        'client_id' => 'pc-a-eth0',
+                        'name' => 'eth0',
+                        'ip_address' => '192.168.10.10',
+                        'subnet_mask' => '255.255.255.0',
+                        'mac_address' => '02:00:00:00:10:10',
+                        'metadata_json' => [],
+                    ]],
+                    'route_entries' => [],
+                ],
+                [
+                    'client_id' => 'router-1',
+                    'name' => 'Router-1',
+                    'type' => Device::TYPE_ROUTER,
+                    'position_x' => 0,
+                    'position_y' => 0,
+                    'default_gateway' => null,
+                    'metadata_json' => [],
+                    'interfaces' => [
+                        ['client_id' => 'router-lan0', 'name' => 'lan0', 'ip_address' => '192.168.10.1', 'subnet_mask' => '255.255.255.0', 'mac_address' => '02:00:00:00:12:01', 'metadata_json' => []],
+                        ['client_id' => 'router-lan1', 'name' => 'lan1', 'ip_address' => '192.168.20.1', 'subnet_mask' => '255.255.255.0', 'mac_address' => '02:00:00:00:12:02', 'metadata_json' => []],
+                    ],
+                    'route_entries' => [],
+                ],
+                [
+                    'client_id' => 'pc-b',
+                    'name' => 'PC-B',
+                    'type' => Device::TYPE_PC,
+                    'position_x' => 0,
+                    'position_y' => 0,
+                    'default_gateway' => '192.168.20.1',
+                    'metadata_json' => [],
+                    'interfaces' => [[
+                        'client_id' => 'pc-b-eth0',
+                        'name' => 'eth0',
+                        'ip_address' => '192.168.20.10',
+                        'subnet_mask' => '255.255.255.0',
+                        'mac_address' => '02:00:00:00:20:10',
+                        'metadata_json' => [],
+                    ]],
+                    'route_entries' => [],
+                ],
+            ],
+            'network_clouds' => [],
+            'links' => [
+                ['interface_a_client_id' => 'pc-a-eth0', 'interface_b_client_id' => 'router-lan0', 'network_cloud_client_id' => null],
+                ['interface_a_client_id' => 'router-lan1', 'interface_b_client_id' => 'pc-b-eth0', 'network_cloud_client_id' => null],
+            ],
+        ]);
+
+        $source = $project->devices->firstWhere('name', 'PC-A');
+
+        $this->postJson("/api/network-projects/{$project->id}/simulate/ping", [
+            'source_device_id' => $source->id,
+            'destination_mode' => 'ip',
+            'destination_ip' => '192.168.20.10',
+        ])->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('destination', 'PC-B')
+            ->assertJsonCount(2, 'arp_table')
+            ->assertJsonPath('arp_table.0.ip_address', '192.168.10.1')
+            ->assertJsonPath('arp_table.1.ip_address', '192.168.20.10');
+    }
+
+    public function test_it_reports_destination_not_found_for_unknown_ip_address(): void
+    {
+        $project = app(NetworkProjectTopologyService::class)->create([
+            'name' => 'Unknown IP',
+            'description' => null,
+            'devices' => [
+                [
+                    'client_id' => 'pc-a',
+                    'name' => 'PC-A',
+                    'type' => Device::TYPE_PC,
+                    'position_x' => 0,
+                    'position_y' => 0,
+                    'default_gateway' => null,
+                    'metadata_json' => [],
+                    'interfaces' => [[
+                        'client_id' => 'pc-a-eth0',
+                        'name' => 'eth0',
+                        'ip_address' => '192.168.10.10',
+                        'subnet_mask' => '255.255.255.0',
+                        'mac_address' => '02:00:00:00:10:10',
+                        'metadata_json' => [],
+                    ]],
+                    'route_entries' => [],
+                ],
+            ],
+            'network_clouds' => [],
+            'links' => [],
+        ]);
+
+        $source = $project->devices->firstWhere('name', 'PC-A');
+
+        $this->postJson("/api/network-projects/{$project->id}/simulate/ping", [
+            'source_device_id' => $source->id,
+            'destination_mode' => 'ip',
+            'destination_ip' => '192.168.99.99',
+        ])->assertOk()
+            ->assertJsonPath('success', false)
+            ->assertJsonPath('error_code', 'DESTINATION_NOT_FOUND');
+    }
 }

@@ -15,8 +15,10 @@ class PingSimulator
     public function simulate(
         NetworkProject $project,
         int $sourceDeviceId,
-        string $destinationType,
-        int $destinationId,
+        string $destinationMode,
+        ?string $destinationType,
+        ?int $destinationId,
+        ?string $destinationIp = null,
     ): array {
         $project->loadMissing([
             'devices.interfaces',
@@ -38,6 +40,15 @@ class PingSimulator
                 [
                     $this->hop($source->name, 'validate-source', 'failed', 'No usable IP interface is configured on the source device.'),
                 ],
+            );
+        }
+
+        if ($destinationMode === 'ip') {
+            return $this->simulateToIpAddress(
+                $project,
+                $source,
+                $sourceInterfaces,
+                $destinationIp,
             );
         }
 
@@ -74,6 +85,49 @@ class PingSimulator
         }
 
         return $this->simulateAcrossSourceInterfacesToCloud($project, $source, $sourceInterfaces, $cloud);
+    }
+
+    private function simulateToIpAddress(
+        NetworkProject $project,
+        Device $source,
+        Collection $sourceInterfaces,
+        ?string $destinationIp,
+    ): array {
+        if (!is_string($destinationIp) || $destinationIp === '') {
+            return $this->failure('DESTINATION_IP_MISSING', 'Destination IP address was not provided.', []);
+        }
+
+        $destinationInterface = $this->findInterfaceByIp($project->devices, $destinationIp);
+        if ($destinationInterface instanceof DeviceInterface) {
+            $destination = $project->devices->firstWhere('id', $destinationInterface->device_id);
+            if (!$destination instanceof Device) {
+                return $this->failure('DESTINATION_NOT_FOUND', 'Destination device was not found.', []);
+            }
+
+            return $this->simulateAcrossDeviceInterfaces(
+                $project,
+                $source,
+                $sourceInterfaces,
+                $destination,
+                collect([$destinationInterface]),
+            );
+        }
+
+        $cloud = $this->findCloudByIp($project->networkClouds, $destinationIp);
+        if ($cloud instanceof NetworkCloud) {
+            return $this->simulateAcrossSourceInterfacesToCloud(
+                $project,
+                $source,
+                $sourceInterfaces,
+                $cloud,
+            );
+        }
+
+        return $this->failure(
+            'DESTINATION_NOT_FOUND',
+            sprintf('No device or cloud matches destination IP %s.', $destinationIp),
+            [],
+        );
     }
 
     private function simulateAcrossDeviceInterfaces(
@@ -761,6 +815,29 @@ class PingSimulator
             $interface = $device->interfaces->firstWhere('ip_address', $ipAddress);
             if ($interface instanceof DeviceInterface) {
                 return $interface;
+            }
+        }
+
+        return null;
+    }
+
+    private function findCloudByIp(Collection $clouds, string $ipAddress): ?NetworkCloud
+    {
+        foreach ($clouds as $cloud) {
+            if (!$cloud instanceof NetworkCloud) {
+                continue;
+            }
+
+            if ($cloud->representative_ip === $ipAddress) {
+                return $cloud;
+            }
+
+            if (
+                $cloud->network_address &&
+                $cloud->subnet_mask &&
+                $this->inSameSubnet($cloud->network_address, $cloud->subnet_mask, $ipAddress)
+            ) {
+                return $cloud;
             }
         }
 
